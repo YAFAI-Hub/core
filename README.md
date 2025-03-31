@@ -1,5 +1,5 @@
 
-## YAFAI-Yet Another Framework for Agentic Interfaces   🚀
+## YAFAI-Yet Another Framework for Agentic Interfaces  🚀
 ### One binary. Full control. Declarative multi-agent orchestration made simple.
 
 ### What is Yafai?
