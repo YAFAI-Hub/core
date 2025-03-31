@@ -1,6 +1,6 @@
 
-# YAFAI - Yet Another Framework for Agentic Interfaces   🚀
-## One binary. Full control. Declarative multi-agent orchestration made simple.
+## YAFAI-Yet Another Framework for Agentic Interfaces   🚀
+### One binary. Full control. Declarative multi-agent orchestration made simple.
 
 ### What is Yafai?
 
@@ -17,30 +17,19 @@ Yafai exposes a config-driven agentic service layer. Pass a configuration file, 
 
 ### Core Philosophy
 
-- **Explicit Over Implicit**  
-  - Configuration should be clear, verbose, and predictable — no magic.
+- **Explicit Over Implicit** : Configuration should be clear, verbose, and predictable — no magic.
 
-- **Opinionated Flow, Extensible Logic**  
-  - The orchestration flow is fixed.  
-  - What happens inside each step is fully customizable.
+- **Opinionated Flow, Extensible Logic** : The orchestration flow is fixed.What happens inside each step is fully customizable.
 
-- **Config-Driven Architecture**  
-  - Agents are defined and connected using declarative YAML.  
-  - One binary, endless flexibility.
+- **Config-Driven Architecture**: Agents are defined and connected using declarative YAML. One binary, endless flexibility.
 
-- **Composable and Modular**  
-  - Users can inject, replace, or extend agents and flow steps without breaking the system.
+- **Composable and Modular**: Users can inject, replace, or extend agents and flow steps without breaking the system.
 
-- **Transparent by Default**  
-  - Built-in tracing ensures every agent's behavior is observable and debuggable.
+- **Transparent by Default**: Built-in tracing ensures every agent's behavior is observable and debuggable.
 
-- **Framework and Ecosystem Friendly**  
-  - Supports both core framework contributions and external modules/configs.  
-  - Yafai is a platform, not just a tool.
+- **Framework and Ecosystem Friendly**: Supports both core framework contributions and external modules/configs.
 
-- **Minimal Runtime, Maximum Control**  
-  - Fast and lightweight.  
-  - Designed for power users who need full control.
+- **Minimal Runtime, Maximum Control**: Fast and lightweight.Designed for power users who need full control.
 
 ---
 
