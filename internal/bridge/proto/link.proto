@@ -1,0 +1,103 @@
+syntax = "proto3";
+
+option go_package = ".;link";
+
+package link;
+
+
+service ChatService{
+    rpc ChatStream (stream ChatRequest) returns (stream ChatResponse);
+}
+
+service Planner{
+    rpc InvokePlanner (PlannerRequest) returns (PlannerResponse);
+    rpc InvokePlanRefine (PlannerRefineRequest) returns (PlannerResponse);
+}
+
+service Orchestrator{
+    rpc InvokeOrchestrator (OrchestratorRequest) returns (OrchestratorResponse);
+    rpc InvokeAgent (AgentRequest) returns (AgentResponse);
+    rpc MonitorAgentExecution (MonitorAgentRequest) returns (stream MonitorAgentResponse);
+}
+
+service Agent{
+    rpc ExecuteAgent (AgentRequest) returns (AgentResponse);
+    rpc ToolDiscovery (DiscoveryRequest) returns (DiscoveryResponse);
+    rpc ToolExecute (ToolExecuteRequest) returns (ToolExecuteResponse);
+}
+
+message ChatRequest{
+    string request = 1;
+}
+
+message ChatResponse{
+    string response = 1;
+    string trace = 2;
+}
+
+message PlannerRequest{
+    string request=1;
+}
+
+message PlannerRefineRequest{
+    string plan=1;
+    string refinement=2;
+}
+message PlannerStep{
+    string Task=1;
+    string Agent=2;
+    string Thought=3;
+}
+
+message PlannerResponse {
+    repeated PlannerStep steps = 1;
+}
+
+message OrchestratorRequest{
+    string request = 1;
+}
+
+message OrchestratorResponse{
+    string response = 1;
+}
+
+message AgentRequest{
+    string request = 1;
+}
+
+message AgentResponse{
+    string response = 1;
+}
+
+message MonitorAgentRequest{
+    string request = 1;
+}
+
+message MonitorAgentResponse{
+    string response = 1;
+}
+
+message DiscoveryRequest{
+    string request = 1;
+}
+
+message DiscoveryResponse{
+    string response = 1;
+}
+
+message ToolExecuteRequest{
+    string name = 1;
+}
+
+message ToolExecuteResponse{
+    string name = 1;
+}
+
+message HeartBeatRequest{
+    string request = 1;
+}
+
+message HeartBeatResponse{
+    string response = 1;
+}
+
