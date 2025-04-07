@@ -23,7 +23,7 @@ builds:
       - linux
       - windows
       - darwin
-    main: ./cmd/yafai/main.go
+    main: main.go
 archives:
   - formats: [tar.gz]
     # this name template makes the OS and Arch compatible with the results of `uname`.
