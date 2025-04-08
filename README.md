@@ -45,7 +45,7 @@ One binary. Full control. Declarative multi-agent orchestration made simple.
     
 ```
 
-<img src="Assets/tui-mode.png" width=800 height=480>
+<img src="assets/tui-mode.png" width=800 height=480>
 
 
 ### Run YAFAI Link - No TerminalUI
