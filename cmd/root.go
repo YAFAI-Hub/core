@@ -26,11 +26,36 @@ import (
 	config "yafai/internal/nexus/configs"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 	grpc "google.golang.org/grpc"
 	reflection "google.golang.org/grpc/reflection"
 )
 
-func setupYafai() (err error) {
+func setupLogging(homeDir string) error {
+	// Set up logging to file
+	var logPath string
+	if os.Getenv("ENV") == "prod" {
+		logPath = fmt.Sprintf("%s/yafai.log", homeDir)
+	} else {
+		logPath = "tmp/debug.log"
+	}
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		return fmt.Errorf("failed to open log file: %v", err)
+	}
+	//defer logFile.Close()
+
+	// Configure the logger to write to the log file
+	logFileHandler := slog.NewTextHandler(logFile, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})
+
+	logger := slog.New(logFileHandler)
+	slog.SetDefault(logger)
+	return nil
+}
+
+func setupYafai(env string) (err error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("failed to get user home directory: %w", err)
@@ -38,6 +63,8 @@ func setupYafai() (err error) {
 
 	yafaiRoot := fmt.Sprintf("%s/.yafai", homeDir)
 	configsDir := fmt.Sprintf("%s/configs", yafaiRoot)
+
+	envPath := fmt.Sprintf("%s/.env", yafaiRoot)
 
 	// Check if .yafai directory exists, create if not
 	if _, err := os.Stat(yafaiRoot); os.IsNotExist(err) {
@@ -54,9 +81,6 @@ func setupYafai() (err error) {
 		}
 		slog.Info("Created .yafai/configs directory", "path", configsDir)
 	}
-
-	envPath := fmt.Sprintf("%s/.env", yafaiRoot)
-
 	// Check if the .env file exists
 	if _, err := os.Stat(envPath); os.IsNotExist(err) {
 		// Create the .env file
@@ -67,18 +91,13 @@ func setupYafai() (err error) {
 		defer file.Close()
 
 		fmt.Println(".env file created. Please enter your GROQ_TOKEN:")
-
-		// Read GROQ_TOKEN from user input
-		var groqToken string
-		for {
-			fmt.Print("Enter GROQ_TOKEN: ")
-			_, err := fmt.Scanln(&groqToken)
-			if err != nil || groqToken == "" {
-				fmt.Println("Invalid input. Please enter a valid GROQ_TOKEN.")
-				continue
-			}
-			break
+		fmt.Print("Enter GROQ_TOKEN: ")
+		groqTokenBytes, err := term.ReadPassword(int(syscall.Stdin))
+		if err != nil {
+			return fmt.Errorf("error reading GROQ_TOKEN: %w", err)
 		}
+		groqToken := string(groqTokenBytes)
+		fmt.Println() // Print newline after password input
 
 		// Write GROQ_TOKEN and GROQ_HOST to the .env file
 		_, err = file.WriteString(fmt.Sprintf("GROQ_TOKEN=%s\n", groqToken))
@@ -93,11 +112,20 @@ func setupYafai() (err error) {
 	}
 
 	err = godotenv.Load(fmt.Sprintf("%s/.env", yafaiRoot))
+
 	if err != nil {
-		slog.Error("Error loading .env file")
+		fmt.Errorf("Error loading .env file : %s", err.Error())
+		log.Panic(err)
 	}
 
 	os.Setenv("YAFAI_ROOT", yafaiRoot)
+	os.Setenv("ENV", env)
+	err = setupLogging(yafaiRoot)
+
+	if err != nil {
+		fmt.Errorf("Failed to create log file - %s", err.Error())
+		log.Panic(err)
+	}
 
 	return err
 }
@@ -137,22 +165,7 @@ func StartLink(ctx context.Context, wsp *workspace.Workspace) (err error) {
 	return nil
 }
 
-func RunClient(wsp *workspace.Workspace, logFilePath string) error {
-
-	// Set up logging to file
-	logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-	if err != nil {
-		log.Fatalf("Failed to open log file: %v", err)
-	}
-	defer logFile.Close()
-
-	// Configure the logger to write to the log file
-	logFileHandler := slog.NewTextHandler(logFile, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	})
-
-	logger := slog.New(logFileHandler)
-	slog.SetDefault(logger)
+func RunClient(wsp *workspace.Workspace) error {
 
 	app := tview.NewApplication()
 	title := fmt.Sprintf("[yellow::b] YAFAI - %s workspace", wsp.Name)
@@ -283,10 +296,10 @@ func RunClient(wsp *workspace.Workspace, logFilePath string) error {
 	return err
 }
 
-func StartYafai() {
+func StartYafai(env string, mode string, configsPath string) error {
 
-	err := setupYafai()
-
+	err := setupYafai(env)
+	slog.Info(configsPath)
 	if err != nil {
 		slog.Error("Error setting up YAFAI: %v", err.Error(), nil)
 		os.Exit(1)
@@ -294,7 +307,14 @@ func StartYafai() {
 
 	//Set root path to env
 	rootPath := os.Getenv("YAFAI_ROOT")
-	configsPath := fmt.Sprintf("%s/configs", rootPath)
+	slog.Info("Root set to : %s", rootPath)
+
+	if configsPath != "default" {
+		slog.Info("Configs Path set to :%s", configsPath)
+	} else {
+		configsPath = fmt.Sprintf("%s/configs", rootPath)
+		slog.Info("Configs Path set to :%s", configsPath)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -303,12 +323,12 @@ func StartYafai() {
 
 	configs, err := config.GetAvailableConfigs(configsPath)
 	if err != nil {
-		slog.Error("No configs found at ~/.yafai/configs. Either create a config file at ~/.yafai/configs, or pass a specific config using --config flag ", "error", err)
+		fmt.Printf("No configs found at ~/.yafai/configs. Either create a config file at ~/.yafai/configs, or pass a specific configs using --config flag %v", err)
 		os.Exit(1)
 	}
 
 	if len(configs) == 0 {
-		slog.Error("No configs found at ~/.yafai/configs. Create a config file at ~/.yafai/configs, refer to sample configs at https://github.com/YAFAI-Hub/core/samples/recipes ", "error", err)
+		fmt.Printf("No configs found at ~/.yafai/configs. Create a config file at ~/.yafai/configs, refer to sample configs at https://github.com/YAFAI-Hub/core/samples/recipes %v", err)
 		os.Exit(1)
 	}
 
@@ -353,16 +373,18 @@ func StartYafai() {
 			cancel()
 		}
 	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		logFilePath := fmt.Sprintf("%s/yafai.log", rootPath)
-		err := RunClient(wsp, logFilePath)
-		if err != nil {
-			slog.Error("Error starting YAFAI client: %v", err.Error(), nil)
-			cancel()
-		}
-	}()
+
+	if mode == "tui" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := RunClient(wsp)
+			if err != nil {
+				slog.Error("Error starting YAFAI client: %v", err.Error(), nil)
+				cancel()
+			}
+		}()
+	}
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -377,6 +399,8 @@ func StartYafai() {
 
 	wg.Wait()
 	slog.Info("Shutdown complete.")
+
+	return err
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -398,9 +422,12 @@ func init() {
 
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.
-	var configPath string
-	rootCmd.PersistentFlags().StringVarP(&configPath, "config", "c", "~/.yafai/configs", "Config Path for running YAFAI workspace")
-	//rootCmd.Flags().StringP("config", "c", "~/.yafai/configs", "Config Path for running YAFAI workspace")
+	var env string
+	var mode string
+	var configsPath string
+	rootCmd.PersistentFlags().StringVarP(&env, "env", "e", "prod", "YAFAI env mode")
+	rootCmd.PersistentFlags().StringVarP(&mode, "mode", "m", "tui", "YAFAI run mode")
+	rootCmd.PersistentFlags().StringVarP(&configsPath, "configsPath", "c", "default", "Config files Path for running YAFAI workspace")
 }
 
 var rootCmd = &cobra.Command{
@@ -408,8 +435,10 @@ var rootCmd = &cobra.Command{
 	Short: "YAFAI-Yet Another Framwework for Agentic Interfaces",
 	Long:  `Root command for YAFAI application.`,
 	Run: func(cmd *cobra.Command, args []string) {
-
-		StartYafai()
+		env, _ := cmd.Flags().GetString("env")
+		mode, _ := cmd.Flags().GetString("mode")
+		configsPath, _ := cmd.Flags().GetString("configsPath")
+		StartYafai(env, mode, configsPath)
 	},
 	// Uncomment the following line if your bare application
 	// has an action associated with it:
