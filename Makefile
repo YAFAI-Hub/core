@@ -2,7 +2,7 @@ all: proto-build
 
 build:
 	mkdir -p tmp
-	go build -o tmp/yafai cmd/yafai/main.go
+	go build -o tmp/yafai main.go
 
 dev:
 	air -c .air.toml
