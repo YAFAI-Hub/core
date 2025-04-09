@@ -9,7 +9,7 @@
 
 version: 2
 
-project_name: yafai
+project_name: yafai-core
 
 before:
   hooks:
