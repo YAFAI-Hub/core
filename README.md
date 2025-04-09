@@ -24,7 +24,7 @@ One binary. Full control. Declarative multi-agent orchestration made simple.
  ```bash
 
     brew tap yafai-hub/yafai
-    brew install core
+    brew install yafai-core
 
     # when prompted enter the Groq API key.
     # create YAFAI config files and place them under ~/.yafai/configs/ , checkout samples under smaples/recipes.
