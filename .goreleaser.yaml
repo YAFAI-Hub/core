@@ -7,7 +7,7 @@
 # vim: set ts=2 sw=2 tw=0 fo=cnqoj
 
 
-version: 2
+version: 2.2
 
 project_name: yafai-core
 
@@ -38,14 +38,19 @@ archives:
     format_overrides:
       - goos: windows
         formats: [zip]
+
 brews:
-  - tap:
-      owner: ssbodapati
-      name: homebrew-yafai
-    folder: Formula
+  - 
     homepage: "https://github.com/YAFAI-Hub/core"
     description: "Core homebrew tap"
     license: "MIT"
+    repository:
+      owner: ssbodapati
+      name: homebrew-yafai
+      branch: main
+      token: "{{ .Env.GITHUB_TOKEN}}"
+
+      
 
 changelog:
   sort: asc
