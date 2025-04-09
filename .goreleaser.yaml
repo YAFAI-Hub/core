@@ -45,7 +45,7 @@ brews:
     description: "Core homebrew tap"
     license: "MIT"
     repository:
-      owner: ssbodapati
+      owner: YAFAI-Hub
       name: homebrew-yafai
       branch: main
       token: "{{ .Env.GITHUB_TOKEN}}"
