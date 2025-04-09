@@ -38,6 +38,14 @@ archives:
     format_overrides:
       - goos: windows
         formats: [zip]
+brews:
+  - tap:
+      owner: ssbodapati
+      name: homebrew-yafai
+    folder: Formula
+    homepage: "https://github.com/YAFAI-Hub/core"
+    description: "Core homebrew tap"
+    license: "MIT"
 
 changelog:
   sort: asc
