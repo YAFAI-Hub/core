@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+option go_package = ".;link";
+
+package link;
+
+
+service ChatService{
+    rpc ChatStream (stream ChatRequest) returns (stream ChatResponse);
+}
+
+
+
+message ChatRequest{
+    string request = 1;
+}
+
+message ChatResponse{
+    string response = 1;
+    string trace = 2;
+}
