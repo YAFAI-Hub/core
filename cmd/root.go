@@ -21,8 +21,9 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/rivo/tview"
 
-	bridge "yafai/internal/bridge"
-	link "yafai/internal/bridge/proto"
+	link "yafai/internal/bridge/link"
+	wsp "yafai/internal/bridge/wsp"
+
 	config "yafai/internal/nexus/configs"
 
 	"github.com/spf13/cobra"
@@ -130,7 +131,7 @@ func setupYafai(env string) (err error) {
 	return err
 }
 
-func StartLink(ctx context.Context, wsp *workspace.Workspace) (err error) {
+func StartLink(ctx context.Context) (err error) {
 
 	lis, err := net.Listen("tcp", ":7001")
 	if err != nil {
@@ -138,25 +139,67 @@ func StartLink(ctx context.Context, wsp *workspace.Workspace) (err error) {
 		return err
 	}
 
-	s := grpc.NewServer()
+	l := grpc.NewServer()
 
-	linkServer := &bridge.LinkServer{Wsp: wsp}
+	conn, err := grpc.NewClient("localhost:7002", grpc.WithInsecure())
+	if err != nil {
+		slog.Error("Failed to connect to gRPC server", "error", err)
+		return err
+	}
 
-	link.RegisterOrchestratorServer(s, linkServer)
-	link.RegisterPlannerServer(s, linkServer)
-	link.RegisterAgentServer(s, linkServer)
-	link.RegisterChatServiceServer(s, linkServer)
+	defer conn.Close()
 
-	reflection.Register(s)
+	client := wsp.NewWorkspaceServiceClient(conn)
+
+	wsp_stream, err := client.LinkStream(context.Background())
+	if err != nil {
+		slog.Error("Failed to open chat stream", "error", err)
+		return err
+	}
+
+	linkServer := &link.LinkServer{WspStream: wsp_stream}
+
+	link.RegisterChatServiceServer(l, linkServer)
+	reflection.Register(l)
 
 	// Handle graceful shutdown
 	go func() {
 		<-ctx.Done()
 		slog.Info("Shutting down YAFAI link...")
-		s.GracefulStop()
+		l.GracefulStop()
 	}()
 
 	slog.Info("YAFAI link listening on port :7001")
+	if err := l.Serve(lis); err != nil {
+		slog.Error("failed to start link", "error", err)
+		return err
+	}
+	return nil
+}
+
+func StartWsp(ctx context.Context, wspConfig *workspace.Workspace) (err error) {
+
+	lis, err := net.Listen("tcp", ":7002")
+	if err != nil {
+		slog.Error("failed to listen", "error", err)
+		return err
+	}
+
+	s := grpc.NewServer()
+
+	wspServer := &wsp.WorkspaceServer{
+		Wsp: wspConfig,
+	}
+	wsp.RegisterWorkspaceServiceServer(s, wspServer)
+
+	// Handle graceful shutdown
+	go func() {
+		<-ctx.Done()
+		slog.Info("Shutting down YAFAI Workspace...")
+		s.GracefulStop()
+	}()
+
+	slog.Info("YAFAI link listening on port :7002")
 	if err := s.Serve(lis); err != nil {
 		slog.Error("failed to start link", "error", err)
 		return err
@@ -367,7 +410,17 @@ func StartYafai(env string, mode string, configsPath string) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		err := StartLink(ctx, wsp)
+		err := StartLink(ctx)
+		if err != nil {
+			slog.Error("Error starting YAFAI link: %v", err.Error(), nil)
+			cancel()
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		err := StartWsp(ctx, wsp)
 		if err != nil {
 			slog.Error("Error starting YAFAI link: %v", err.Error(), nil)
 			cancel()
