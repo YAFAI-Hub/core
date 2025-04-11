@@ -1,8 +1,11 @@
 
 ## YAFAI-Yet Another Framework for Agentic Interfaces  🚀
 
-### YAFAI : Define and Deploy agentic interfaces. 
+### YAFAI : Define and Deploy Agentic interfaces. 
 #### Consume YAFAI's multi agent system on any platform mobile,web,desktop or even terminal via YAFAI Link.
+
+**What is an Agentic Workspace?** <br>
+YAFAI's agentic workspaces are a collection of purpose built agents working together to achieve a common goal.Think of this like a team of helpful assistants that can solve tasks for you using available integrations.
 
 ![Yafai Workspaces](assets/yafai-workspaces.png)
 
