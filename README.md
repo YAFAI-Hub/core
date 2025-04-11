@@ -1,8 +1,7 @@
 
 ## YAFAI-Yet Another Framework for Agentic Interfaces  🚀
 
-### YAFAI : Define Once, deploy integrate every where mobile,web,desktop or terminal
-
+### YAFAI : Define, Deploy and integrate every where mobile,web,desktop or even terminal
 
 ![Yafai Workspaces](assets/yafai-workspaces.png)
 
