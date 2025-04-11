@@ -22,7 +22,7 @@ func (o *YafaiOrchestrator) SetupPrompt() (prompt string, err error) {
 	if err != nil {
 		slog.Error(err.Error())
 	}
-	var orch_data = OrchestratorPromtpStruct{ChatRecords: chats, Confirmation: "not confirmed", Scope: o.Scope}
+	var orch_data = OrchestratorPromptStruct{ChatRecords: chats, Confirmation: "not confirmed", Scope: o.Scope}
 
 	var system_prompt_string bytes.Buffer
 
@@ -98,12 +98,40 @@ func (o *YafaiOrchestrator) Execute(ctx context.Context, req *YafaiRequest) (res
 	return &YafaiResponse{Source: "orchestrator", Response: payload}, err
 }
 
-func (o *YafaiOrchestrator) Parse() error {
-	// Implement the logic to parse the agent's response
-	return nil
-}
-
-func (o *YafaiOrchestrator) Close() error {
+func (o *YafaiOrchestrator) Parse(ctx context.Context, task string, agent_log map[string]string) (response string, err error) {
 	// Implement the logic to close the agent's resources
-	return nil
+	synth_tmpl, err := template.New("OrchSynth").Parse(templates.SynthPrompt)
+	if err != nil {
+		slog.Error(err.Error())
+	}
+	var synth_string bytes.Buffer
+	var builder strings.Builder
+	for name, log := range agent_log {
+		builder.WriteString("Name: " + name + "\n")
+		builder.WriteString("Output: " + log + "\n")
+	}
+
+	logs := AgentLogs{Task: task, AgentLog: builder.String()}
+	err = synth_tmpl.Execute(&synth_string, logs)
+	if err != nil {
+		slog.Error(err.Error())
+	}
+
+	//synth_prompt, err :=
+	if err != nil {
+		slog.Error(err.Error())
+	}
+	provider := providers.GetProvider(o.Provider)
+	client := provider.Init()
+	system_request := providers.RequestMessage{Role: "system", Content: synth_string.String()}
+	user_request := providers.RequestMessage{Role: "user", Content: "analyse the agent logs and give final answer"}
+
+	provider_req := providers.GenAIProviderRequest{Model: o.Model, Messages: []providers.RequestMessage{system_request, user_request}, Stream: false}
+	completion, err := provider.Generate(ctx, client, provider_req)
+	if err != nil {
+		slog.Error(err.Error())
+	}
+	payload := &providers.ResponseMessage{Role: "assistant", Content: completion.Choices[0].Message.Content}
+	payload.Content = strings.ReplaceAll(payload.Content, "\\", "")
+	return payload.Content, nil
 }

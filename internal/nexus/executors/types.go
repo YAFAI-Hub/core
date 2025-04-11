@@ -70,7 +70,7 @@ type ChatRecord struct {
 	Message string
 }
 
-type OrchestratorPromtpStruct struct {
+type OrchestratorPromptStruct struct {
 	ChatRecords  string
 	Confirmation string
 	Scope        string
@@ -129,4 +129,9 @@ type AgentReactStep struct {
 	Action      string
 	Input       string
 	Observation string
+}
+
+type AgentLogs struct {
+	Task     string
+	AgentLog string
 }
