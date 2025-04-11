@@ -1,7 +1,7 @@
 package templates
 
 var PlannerTemplate string = `
-You are Yafai Planner, responsible for breaking down complex user requests into a series of actionable tasks. Given the following list of available agents:
+You are Yafai Planner, responsible for breaking down complex user requests into a series of actionable tasks in a logical order. Given the following list of available agents:
 
 {{.Agents}}
 

@@ -25,54 +25,56 @@ func (l *LinkServer) ChatStream(stream ChatService_ChatStreamServer) (err error)
 		}
 	}()
 
-	for {
-		packet, err := stream.Recv()
-		if err == io.EOF {
-			slog.Info("Client closed the connection", "connection_id", connID)
-			return nil // Return cleanly on client disconnect
-		}
-		if err != nil {
-			slog.Error("Error receiving packet",
-				"connection_id", connID,
-				"error", err)
-			return err // Return on other errors to close the stream
-		}
+	// Error channel to capture goroutine errors
+	errChan := make(chan error, 1)
 
-		slog.Info("Received packet",
-			"connection_id", connID, "message", packet)
+	// Done channel to signal workspace goroutine completion
+	doneChan := make(chan struct{})
 
-		// Create channels for error handling
-		errChan := make(chan error, 1)
-		done := make(chan struct{})
-
-		// Handle client -> workspace communication
-		if err := l.WspStream.Send(&wsp.LinkRequest{
-			Request: packet.Request,
-		}); err != nil {
-			close(done)
-			return err
-		}
-
-		// Handle workspace -> client communication
-		go func() {
-			for {
-				resp, err := l.WspStream.Recv()
-				if err != nil {
-					errChan <- err
-					return
-				}
-
-				if err := stream.Send(&ChatResponse{
-					Response: resp.Response,
-					Trace:    resp.Trace,
-				}); err != nil {
-					errChan <- err
-					return
-				}
+	// Start goroutine to receive from workspace and forward to client
+	go func() {
+		defer close(doneChan) // Signal completion when the goroutine exits
+		for {
+			resp, err := l.WspStream.Recv()
+			if err != nil {
+				errChan <- fmt.Errorf("workspace recv failed: %w", err)
+				return
 			}
-		}()
+			slog.Info("Got response from workspace")
 
-		// Handle client -> workspace communication in main loop
+			if err := stream.Send(&ChatResponse{
+				Response: resp.Response,
+				Trace:    resp.Trace,
+			}); err != nil {
+				errChan <- fmt.Errorf("client send failed: %w", err)
+				return
+			}
+		}
+	}()
 
+	// Main loop: receive from client, send to workspace
+	for {
+		select {
+		case err := <-errChan:
+			return err // Workspace goroutine error
+		case <-doneChan:
+			return fmt.Errorf("workspace receiver goroutine exited unexpectedly")
+		default:
+			packet, err := stream.Recv()
+			if err == io.EOF {
+				slog.Info("Client closed connection")
+				return nil
+			}
+			if err != nil {
+				return fmt.Errorf("client recv error: %w", err)
+			}
+
+			if err := l.WspStream.Send(&wsp.LinkRequest{
+				Request: packet.Request,
+			}); err != nil {
+				return fmt.Errorf("workspace send error: %w", err)
+			}
+		}
 	}
+
 }
