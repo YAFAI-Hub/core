@@ -14,10 +14,22 @@ install:
 	go build -o tmp/yafai main.go
 	sudo cp tmp/yafai /usr/local/bin
 
-proto-build:
-	protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative internal/bridge/proto/link.proto
+proto-gen:
+	@find internal/bridge/ -name "*.proto" | while read proto_file; do \
+		service_dir=$$(dirname $$proto_file | sed 's|internal/bridge/||'); \
+		mkdir -p internal/bridge/$$service_dir; \
+		protoc --proto_path=. \
+			--go_out=internal/bridge/$$service_dir \
+			--go-grpc_out=internal/bridge/$$service_dir \
+			$$proto_file; \
+	done
 
-proto-clean:
-	rm -rf bridge/proto/*.pb.go
+
+
+
+
+proto-rm:
+	rm -rf internal/bridge/gen/
+
 
 .PHONY: all build dev run install proto-build proto-clean
