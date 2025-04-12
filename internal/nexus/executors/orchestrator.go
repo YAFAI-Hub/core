@@ -98,8 +98,8 @@ func (o *YafaiOrchestrator) Execute(ctx context.Context, req *YafaiRequest) (res
 	return &YafaiResponse{Source: "orchestrator", Response: payload}, err
 }
 
-func (o *YafaiOrchestrator) Parse(ctx context.Context, task string, agent_log map[string]string) (response string, err error) {
-	// Implement the logic to close the agent's resources
+func (o *YafaiOrchestrator) Parse(ctx context.Context, agent_log map[string]string) (response string, err error) {
+	// Implement the logic to prepare orchestrator based on agent logs.
 	synth_tmpl, err := template.New("OrchSynth").Parse(templates.SynthPrompt)
 	if err != nil {
 		slog.Error(err.Error())
@@ -111,7 +111,7 @@ func (o *YafaiOrchestrator) Parse(ctx context.Context, task string, agent_log ma
 		builder.WriteString("Output: " + log + "\n")
 	}
 
-	logs := AgentLogs{Task: task, AgentLog: builder.String()}
+	logs := AgentLogs{AgentLogs: builder.String()}
 	err = synth_tmpl.Execute(&synth_string, logs)
 	if err != nil {
 		slog.Error(err.Error())

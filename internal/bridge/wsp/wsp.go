@@ -13,6 +13,30 @@ import (
 	"yafai/internal/nexus/providers"
 )
 
+func stripJsonDelimiters(rawString string) string {
+	startDelimiter := "```json"
+	endDelimiter := "```"
+
+	// 1. Trim leading/trailing whitespace from the input string
+	trimmed := strings.TrimSpace(rawString)
+
+	// 2. Check if the trimmed string has the specified prefix and suffix
+	hasPrefix := strings.HasPrefix(trimmed, startDelimiter)
+	hasSuffix := strings.HasSuffix(trimmed, endDelimiter)
+
+	// 3. Ensure the string is long enough to contain more than just the delimiters
+	if hasPrefix && hasSuffix && len(trimmed) > len(startDelimiter)+len(endDelimiter) {
+		// Extract the content between the delimiters
+		content := trimmed[len(startDelimiter) : len(trimmed)-len(endDelimiter)]
+
+		// Trim whitespace from the extracted content itself
+		return strings.TrimSpace(content)
+	}
+
+	// 4. If delimiters weren't found correctly, return the trimmed original string
+	return trimmed
+}
+
 func (s *WorkspaceServer) LinkStream(stream WorkspaceService_LinkStreamServer) (err error) {
 	connID := fmt.Sprintf("conn_%d", time.Now().UnixNano())
 	slog.Info("New client connected", "connection_id", connID)
@@ -62,8 +86,8 @@ func (s *WorkspaceServer) LinkStream(stream WorkspaceService_LinkStreamServer) (
 				errChan <- err
 				return
 			}
-
-			jsonResp := []byte(resp.Response)
+			output := stripJsonDelimiters(resp.Response)
+			jsonResp := []byte(output)
 			var jsonMap map[string]interface{}
 
 			if err := json.Unmarshal(jsonResp, &jsonMap); err != nil {
@@ -170,7 +194,7 @@ func (s *WorkspaceServer) LinkStream(stream WorkspaceService_LinkStreamServer) (
 
 					}
 					result, err := s.Wsp.Orchestrator.Team[step.Agent].Execute(ctx, &executors.YafaiRequest{Request: &providers.RequestMessage{Role: "user", Content: step.Task}})
-					agent_log[step.Agent] = result.Response.Content
+					agent_log[step.Agent] = fmt.Sprintf("Agent step: %s \n Agent result : %s \n", step.Task, result.Response.Content)
 					if err != nil {
 						slog.Error("Error executing plan step",
 							"connection_id", connID,
@@ -186,7 +210,7 @@ func (s *WorkspaceServer) LinkStream(stream WorkspaceService_LinkStreamServer) (
 
 					// Send the execution result as a response to the client
 					if err := stream.Send(&LinkResponse{
-						Response: fmt.Sprintf("%s agent completed the step."),
+						Response: fmt.Sprintf("%s agent completed the step.", step.Agent),
 						Trace:    fmt.Sprintf("Source : %s-Agent", step.Agent),
 					}); err != nil {
 						slog.Error("Error sending execution result response",
@@ -198,7 +222,7 @@ func (s *WorkspaceServer) LinkStream(stream WorkspaceService_LinkStreamServer) (
 
 				}
 
-				final_response, err := s.Wsp.Orchestrator.Parse(ctx, "test", agent_log)
+				final_response, err := s.Wsp.Orchestrator.Parse(ctx, agent_log)
 				if err != nil {
 					slog.Error(err.Error())
 					panic(err)
