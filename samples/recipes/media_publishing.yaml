@@ -7,7 +7,7 @@ orchestrator:
   name: "editor_in_chief"
   description: "Oversees content planning, publishing flow, and quality checks."
   scope: "Help user plan, create, edit, and publish media content efficiently."
-  model: "llama-3.2-3b-preview"
+  model: "llama-3.3-70b-specdec"
   provider: "groq"
   goal: "Streamline end-to-end media content publishing."
   team:

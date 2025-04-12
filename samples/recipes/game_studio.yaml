@@ -13,9 +13,9 @@ orchestrator:
   team:
     character_designer:
       name: "character_designer"
-      capabilities: "generate character traits, motivations, backgrounds, and relationships (non-visual)"
+      capabilities: "generate character traits."
       description: "Creates detailed non-visual character concepts for the RPG."
-      model: "llama-3.2-1b-preview"
+      model: "llama-3.2-3b-preview"
       provider: "groq"
       goal: "Produce compelling and well-defined character foundations."
       depends: "narrative_director"
@@ -23,9 +23,9 @@ orchestrator:
       status: "Initialised"
     story_writer:
       name: "story_writer"
-      capabilities: "generate plotlines, character backstories, dialogue, and lore, incorporating character designs"
+      capabilities: "generate plotlines, character backstories incorporating character designs."
       description: "Creates engaging narrative elements for the RPG, utilizing character designs."
-      model: "llama-3.2-1b-preview"
+      model: "llama-3.2-3b-preview"
       provider: "groq"
       goal: "Produce high-quality, immersive narrative content with integrated characters."
       depends: "narrative_director, character_designer"
@@ -35,7 +35,7 @@ orchestrator:
       name: "narrative_editor"
       capabilities: "edit and enhance generated narrative and character content for consistency, tone, and flow"
       description: "Improves clarity, grammar, style, character consistency, and world-building coherence."
-      model: "llama-3.2-1b-preview"
+      model: "llama-3.2-3b-preview"
       provider: "groq"
       goal: "Ensure publication-ready narrative and character quality and consistency."
       depends: "story_writer, character_designer"

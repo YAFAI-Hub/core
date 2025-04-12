@@ -132,6 +132,5 @@ type AgentReactStep struct {
 }
 
 type AgentLogs struct {
-	Task     string
-	AgentLog string
+	AgentLogs string
 }
