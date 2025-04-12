@@ -186,7 +186,7 @@ func (s *WorkspaceServer) LinkStream(stream WorkspaceService_LinkStreamServer) (
 
 					// Send the execution result as a response to the client
 					if err := stream.Send(&LinkResponse{
-						Response: fmt.Sprintf("%s agent completed the step."),
+						Response: fmt.Sprintf("%s agent completed the step.", step.Agent),
 						Trace:    fmt.Sprintf("Source : %s-Agent", step.Agent),
 					}); err != nil {
 						slog.Error("Error sending execution result response",

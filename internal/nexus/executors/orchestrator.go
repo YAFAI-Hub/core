@@ -99,7 +99,7 @@ func (o *YafaiOrchestrator) Execute(ctx context.Context, req *YafaiRequest) (res
 }
 
 func (o *YafaiOrchestrator) Parse(ctx context.Context, task string, agent_log map[string]string) (response string, err error) {
-	// Implement the logic to close the agent's resources
+	// Implement the logic to prepare orchestrator based on agent logs.
 	synth_tmpl, err := template.New("OrchSynth").Parse(templates.SynthPrompt)
 	if err != nil {
 		slog.Error(err.Error())
