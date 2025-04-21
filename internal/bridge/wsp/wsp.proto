@@ -18,6 +18,7 @@ service WorkspaceService {
     rpc ToolExecute (ToolExecuteRequest) returns (ToolExecuteResponse);
 }
 
+
 message LinkRequest{
     string request = 1;
 }

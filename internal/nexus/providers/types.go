@@ -2,29 +2,49 @@ package providers
 
 //import "nexus/providers"
 
-type Role string
-
 type RequestMessage struct {
-	Role    Role     `json:"role"`
+	Role    string   `json:"role"`
 	Content string   `json:"content"`
 	Image   []string `json:"image,omitempty"`
 	//Tools   []providers.Tool `json:"tool,omitempty"`
 }
 
-type ToolFunction struct {
-	Name        string `json:"name"`
-	Description string `jdon:"description"`
-	Arguments   string `json:"arguments"`
+type LLMTool struct {
+	Type     string      `json:"type"`
+	Function LLMFunction `json:"function"`
+}
+
+type LLMFunction struct {
+	Name        string                `json:"name"`
+	Description string                `json:"description"`
+	Parameters  LLMFunctionParameters `json:"parameters"`
+}
+
+type LLMFunctionParameters struct {
+	Type       string                 `json:"type"` // always "object"
+	Properties map[string]LLMProperty `json:"properties"`
+	Required   []string               `json:"required,omitempty"`
+}
+
+type LLMProperty struct {
+	Type        string   `json:"type"`
+	Description string   `json:"description"`
+	Enum        []string `json:"enum,omitempty"` // optional
+}
+
+type ToolCallFunc struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"` // JSON string
 }
 
 type ToolCall struct {
 	ID       string       `json:"id"`
 	Type     string       `json:"type"`
-	Function ToolFunction `json:"function"`
+	Function ToolCallFunc `json:"function"`
 }
 
 type ResponseMessage struct {
-	Role      Role       `json:"role"`
+	Role      string     `json:"role"`
 	Content   string     `json:"content"`
 	Thought   string     `json:"reasoning,omitempty"`
 	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
@@ -33,7 +53,7 @@ type ResponseMessage struct {
 type ResponseChoice struct {
 	Index        int `json:"index"`
 	Message      ResponseMessage
-	Logprobs     interface{} `json:"logprobs"` 
+	Logprobs     interface{} `json:"logprobs"`
 	FinishReason string      `json:"finish_reason"`
 }
 
@@ -48,12 +68,12 @@ type ResponseUsage struct {
 }
 
 type GenAIProviderRequest struct {
-	Model    string           `json:"model"`
-	Messages []RequestMessage `json:"messages"`
-	ResponseFormat  interface{}    `json:"response_format,omitempty"`
-	ReasoningFormat string         `json:"reasoning_format,omitempty"`
-	Stream          bool           `json:"stream"`
-	Tools           []ToolFunction `json:"tools"`
+	Model           string           `json:"model"`
+	Messages        []RequestMessage `json:"messages"`
+	ResponseFormat  interface{}      `json:"response_format,omitempty"`
+	ReasoningFormat string           `json:"reasoning_format,omitempty"`
+	Stream          bool             `json:"stream"`
+	Tools           []LLMTool        `json:"tools"`
 }
 
 type GenAIProviderResponse struct {
@@ -64,6 +84,10 @@ type GenAIProviderResponse struct {
 	Choices           []ResponseChoice `json:"choices"`
 	Usage             ResponseUsage    `json:"usage"`
 	SystemFingerprint string           `json:"system_fingerprint"`
+}
+
+type ResponseFormat struct {
+	Type string `json:"type"`
 }
 
 // type GenAIProviderResponse struct {

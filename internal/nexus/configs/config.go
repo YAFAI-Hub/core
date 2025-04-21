@@ -25,6 +25,11 @@ func GetAvailableConfigs(path string) ([]string, error) {
 	return configs, nil
 }
 
+func NewWorkspace(path string) *workspace.Workspace {
+	wsp := ParseConfig(path)
+	return wsp
+}
+
 func ParseConfig(path string) *workspace.Workspace {
 
 	data, err := os.ReadFile(path)
@@ -49,8 +54,8 @@ func ParseConfig(path string) *workspace.Workspace {
 	workspace := workspace.Workspace{
 		Name:         config.Name,
 		Scope:        config.Scope,
-		Planner:      config.Planner,
-		Orchestrator: config.Orchestrator,
+		Planner:      &config.Planner,
+		Orchestrator: &config.Orchestrator,
 		Integrations: config.Integrations,
 		VectorStore:  config.VectorStore,
 		Bridge:       config.Bridge,

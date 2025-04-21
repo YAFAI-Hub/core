@@ -37,272 +37,132 @@ func stripJsonDelimiters(rawString string) string {
 	return trimmed
 }
 
-func (s *WorkspaceServer) LinkStream(stream WorkspaceService_LinkStreamServer) (err error) {
+func (s *WorkspaceServer) LinkStream(stream WorkspaceService_LinkStreamServer) (err error) { // Assume YourServiceServer and YourService_LinkServer types
 	connID := fmt.Sprintf("conn_%d", time.Now().UnixNano())
 	slog.Info("New client connected", "connection_id", connID)
 
+	// Defer to log closure regardless of how the function exits.
 	defer func() {
 		slog.Info("Closing stream", "connection_id", connID)
-		// Don't send closing message if the connection is already closed
-		if err == nil {
-			if sendErr := stream.Send(&LinkResponse{Response: "Connection closed by server"}); sendErr != nil {
-				slog.Info("Could not send closing message",
-					"connection_id", connID,
-					"error", sendErr)
-			}
-		}
 	}()
 
+	ctx := stream.Context() // Use the stream's context for cancellable operations
+
+	// Outer loop: Receive packets from the client
 	for {
 		packet, err := stream.Recv()
 		if err == io.EOF {
 			slog.Info("Client closed the connection", "connection_id", connID)
-			return nil // Return cleanly on client disconnect
+			return nil
 		}
 		if err != nil {
-			slog.Error("Error receiving packet",
-				"connection_id", connID,
-				"error", err)
-			return err // Return on other errors to close the stream
+			slog.Error("Error receiving packet", "connection_id", connID, "error", err)
+			return err
 		}
 
-		record := &executors.ChatRecord{From: "user", To: "orchestrator", Message: packet.Request}
-		s.Wsp.Orchestrator.AppendChatRecord(record.From, record.To, record.Message)
-		slog.Info("Received packet",
-			"connection_id", connID,
-			"packet", packet.Request)
+		// Append user message to orchestrator history
+		s.Wsp.Orchestrator.AppendChatRecord("user", "orchestrator", packet.Request)
+		currentRequest := packet.Request
 
-		ctx := context.Background()
-
-		//channel to handle errors from goroutine
-		errChan := make(chan error, 1)
-
-		go func(packet *LinkRequest) {
-			resp, err := s.InvokeOrchestrator(ctx, &OrchestratorRequest{Request: packet.Request})
-			if err != nil {
-				slog.Error("Error invoking orchestrator",
-					"connection_id", connID,
-					"error", err.Error())
-				errChan <- err
-				return
+		// ReACT loop for this packet
+		for {
+			// Check for cancellation
+			select {
+			case <-ctx.Done():
+				slog.Error("Stream context cancelled", "connection_id", connID, "error", ctx.Err())
+				return ctx.Err()
+			default:
 			}
+
+			// 1. Plan/Invoke: ask orchestrator what to do
+			resp, err := s.InvokeOrchestrator(ctx, &OrchestratorRequest{Request: currentRequest})
+			if err != nil {
+				slog.Error("Error invoking orchestrator", "connection_id", connID, "error", err)
+				stream.Send(&LinkResponse{Response: fmt.Sprintf("Orchestrator Error: %v", err)})
+				break
+			}
+
+			// 2. Observe: parse orchestrator JSON
 			output := stripJsonDelimiters(resp.Response)
-			jsonResp := []byte(output)
-			var jsonMap map[string]interface{}
-
-			if err := json.Unmarshal(jsonResp, &jsonMap); err != nil {
-				slog.Error("Error unmarshaling JSON response",
-					"connection_id", connID,
-					"error", err)
-				errChan <- err
-				return
+			var j map[string]interface{}
+			if err := json.Unmarshal([]byte(output), &j); err != nil {
+				slog.Error("Error parsing orchestrator response", "connection_id", connID, "error", err)
+				stream.Send(&LinkResponse{Response: fmt.Sprintf("Internal Error: %v", err)})
+				break
 			}
 
-			if chatMessage, ok := jsonMap["chat"].(string); ok {
-				slog.Info("chat message received", "connection_id", connID, "message", chatMessage)
-				if err := stream.Send(&LinkResponse{
-					Response: chatMessage,
-					Trace:    "Source : YAFAI-Orchestrator",
-				}); err != nil {
-					slog.Error("Error sending chat response",
-						"connection_id", connID,
-						"error", err)
-					errChan <- err
-					return
-				}
+			// Handle chat_reply from orchestrator
+			if msg, ok := j["chat"].(string); ok {
+				s.Wsp.Orchestrator.AppendChatRecord("orchestrator", "user", msg)
+				stream.Send(&LinkResponse{Response: msg, Trace: "Source: Orchestrator"})
+				break
 			}
 
-			if invokePlanner, ok := jsonMap["invoke_planner"].(bool); ok && invokePlanner {
-				slog.Info("invoke_planner is true",
-					"connection_id", connID)
-				req := fmt.Sprintf("Here is some context : %v. Now %s", s.Wsp.Orchestrator.History, packet.Request)
-				plan, err := s.InvokePlanner(ctx, &PlannerRequest{Request: req})
-				if err != nil {
-					slog.Error("Error invoking planner",
-						"connection_id", connID,
-						"error", err.Error())
-					errChan <- err
-					return
-				}
-				s.Wsp.Orchestrator.AppendChatRecord("planner", "user", "Plan submitted for user review")
+			// Handle agent_invoke
+			if name, ok := j["name"].(string); ok {
+				task, _ := j["task"].(string)
+				// Append orchestrator plan to history
+				s.Wsp.Orchestrator.AppendChatRecord("orchestrator", name, task)
 
-				for _, step := range plan.Steps {
-					slog.Info("Executing planner step",
-						"connection_id", connID,
-						"task", step.Task,
-						"agent", step.Agent,
-						"thought", step.Thought)
+				// Prepare agent request
+				agentReq := &executors.YafaiRequest{Request: &providers.RequestMessage{Role: "user", Content: task}}
 
-					// Append the planner step to the chat record
-
-					// Send the planner step as a response to the client
-					if err := stream.Send(&LinkResponse{
-						Response: fmt.Sprintf("Planner Step - Task: %s, Agent: %s, Thought: %s", step.Task, step.Agent, step.Thought),
-						Trace:    "Source : YAFAI-Planner",
-					}); err != nil {
-						slog.Error("Error sending planner step response",
-							"connection_id", connID,
-							"error", err)
-						errChan <- err
+				// Run agent execution in goroutine and wait
+				resultCh := make(chan *executors.YafaiResponse, 1)
+				errCh := make(chan error, 1)
+				go func() {
+					agentExec, exists := s.Wsp.Orchestrator.Team[name]
+					if !exists {
+						errCh <- fmt.Errorf("agent '%s' not found", name)
 						return
 					}
-				}
-				// Add logic to handle invoke_planner being true
-			} else {
-				slog.Info("invoke_planner is false or missing",
-					"connection_id", connID)
-			}
-			if executePlan, ok := jsonMap["execute_plan"].(bool); ok && executePlan {
-				slog.Info("execute_plan is true", "connection_id", connID)
-
-				plan := s.Wsp.Orchestrator.Plan
-				if plan == nil {
-					slog.Error("No plan available to execute", "connection_id", connID)
-					errChan <- fmt.Errorf("no plan available to execute")
-					return
-				}
-				agent_log := make(map[string]string)
-				for _, step := range plan.Response {
-					slog.Info("Executing plan step",
-						"connection_id", connID,
-						"task", step.Task,
-						"agent", step.Agent,
-						"thought", step.Thought,
-						"depends_on", step.DependsOn)
-
-					// Execute the step
-					if step.DependsOn == "" {
-						slog.Info("Step has no dependency",
-							"connection_id", connID,
-							"depends_on", step.DependsOn)
-					} else {
-						slog.Info("Step has dependency",
-							"connection_id", connID,
-							"depends_on", step.DependsOn)
-						if result, ok := agent_log[step.DependsOn]; ok {
-							slog.Info("Dependency result found",
-								"connection_id", connID,
-								"result", result)
-							step.Task = fmt.Sprintf("The output from  %s is \n %s \n. Now, %s ", step.Agent, result, step.Task)
-						} else {
-							slog.Error("Dependency result not found",
-								"connection_id", connID,
-								"dependency", step.DependsOn)
-							errChan <- fmt.Errorf("dependency result not found for %s", step.DependsOn)
-							return
-						}
-
-					}
-					result, err := s.Wsp.Orchestrator.Team[step.Agent].Execute(ctx, &executors.YafaiRequest{Request: &providers.RequestMessage{Role: "user", Content: step.Task}})
-					agent_log[step.Agent] = fmt.Sprintf("Agent step: %s \n Agent result : %s \n", step.Task, result.Response.Content)
+					res, err := agentExec.Execute(ctx, agentReq)
 					if err != nil {
-						slog.Error("Error executing plan step",
-							"connection_id", connID,
-							"task", step.Task,
-							"error", err)
-						errChan <- err
-						return
+						errCh <- err
+					} else {
+						resultCh <- res
 					}
+				}()
 
-					// Append the execution result to the chat record
+				var agentRes *executors.YafaiResponse
+				select {
+				case err := <-errCh:
+					slog.Error("Agent execution failed", "agent", name, "error", err)
+					s.Wsp.Orchestrator.AppendChatRecord(name, "error", err.Error())
+					stream.Send(&LinkResponse{Response: fmt.Sprintf("Agent '%s' error: %v", name, err)})
+					currentRequest = fmt.Sprintf("Previous agent '%s' failed with error: %s. What's next?", name, err)
+					continue
 
-					s.Wsp.Orchestrator.AppendChatRecord(step.Agent, "user", result.Response.Content)
-
-					// Send the execution result as a response to the client
-					if err := stream.Send(&LinkResponse{
-						Response: fmt.Sprintf("%s agent completed the step.", step.Agent),
-						Trace:    fmt.Sprintf("Source : %s-Agent", step.Agent),
-					}); err != nil {
-						slog.Error("Error sending execution result response",
-							"connection_id", connID,
-							"error", err)
-						errChan <- err
-						return
-					}
-
+				case agentRes = <-resultCh:
+					// Append agent result to history
+					content := agentRes.Response.Content
+					s.Wsp.Orchestrator.AppendChatRecord(name, "user", content)
+					stream.Send(&LinkResponse{Response: content, Trace: fmt.Sprintf("Source: %s-Agent", name)})
+					currentRequest = fmt.Sprintf("Previous agent '%s' executed task '%s' with result: '%s'. What's next?", name, task, content)
 				}
-
-				final_response, err := s.Wsp.Orchestrator.Parse(ctx, agent_log)
-				if err != nil {
-					slog.Error(err.Error())
-					panic(err)
-				}
-				stream.Send(&LinkResponse{Response: final_response, Trace: "Execution Complete."})
-			} else {
-				slog.Info("execute_plan is false or missing", "connection_id", connID)
-			}
-
-			if refinePlan, ok := jsonMap["refine_plan"].(bool); ok && refinePlan {
-				slog.Info("refine_plan is true", "connection_id", connID)
-
-				plan := s.Wsp.Orchestrator.Plan
-				if plan == nil {
-					slog.Error("No plan available to refine", "connection_id", connID)
-					errChan <- fmt.Errorf("no plan available to refine")
-					return
-				}
-				var plan_string string
-				for _, step := range plan.Response {
-					plan_string += fmt.Sprintf("Task: %s, Agent: %s, Thought: %s\n", step.Task, step.Agent, step.Thought)
-				}
-				refine_req := &PlannerRefineRequest{Plan: plan_string, Refinement: packet.Request}
-				refinedPlan, err := s.InvokePlanRefine(ctx, refine_req)
-				if err != nil {
-					slog.Error("Error refining plan",
-						"connection_id", connID,
-						"error", err)
-					errChan <- err
-					return
-				}
-
-				s.Wsp.Orchestrator.AppendChatRecord("orchestrator", "user", "Plan refined successfully")
-
-				for _, step := range refinedPlan.Steps {
-					slog.Info("Refined plan step",
-						"connection_id", connID,
-						"task", step.Task,
-						"agent", step.Agent,
-						"thought", step.Thought)
-
-					// Send the refined plan step as a response to the client
-					if err := stream.Send(&LinkResponse{
-						Response: fmt.Sprintf("Refined Plan Step - Task: %s, Agent: %s, Thought: %s", step.Task, step.Agent, step.Thought),
-						Trace:    "Source : YAFAI-Planer Refine",
-					}); err != nil {
-						slog.Error("Error sending refined plan step response",
-							"connection_id", connID,
-							"error", err)
-						errChan <- err
-						return
-					}
-				}
-			} else {
-				slog.Info("refine_plan is false or missing", "connection_id", connID)
-			}
-
-			errChan <- nil
-		}(packet)
-
-		// Wait for goroutine to complete or context to be cancelled
-		select {
-		case err := <-errChan:
-			if err != nil {
-				slog.Error("Error in stream processing",
-					"connection_id", connID,
-					"error", err)
-				// Continue serving other requests even if this one failed
+				// Next iteration of the ReACT loop uses updated currentRequest
 				continue
 			}
-		case <-ctx.Done():
-			slog.Error("Context cancelled",
-				"connection_id", connID,
-				"error", ctx.Err())
-			return ctx.Err()
+
+			// Handle final_answer
+			if ans, ok := j["answer"].(string); ok {
+				s.Wsp.Orchestrator.AppendChatRecord("orchestrator", "user", ans)
+				stream.Send(&LinkResponse{Response: ans, Trace: "Source: Orchestrator"})
+				break
+			}
+
+			// Unexpected format
+			slog.Warn("Unexpected orchestrator response format", "response", output)
+			stream.Send(&LinkResponse{Response: "Internal Error: Unexpected response format from orchestrator."})
+			break
 		}
+		// Inner loop ends; wait for next packet
 	}
+	// End of outer receive packet loop
 }
 
 func (s *WorkspaceServer) InvokeOrchestrator(ctx context.Context, req *OrchestratorRequest) (resp *OrchestratorResponse, err error) {
+	slog.Info("Orchestrator Request:", req.Request)
 	orch_resp, err := s.Wsp.Orchestrator.Execute(ctx, &executors.YafaiRequest{Request: &providers.RequestMessage{Role: "user", Content: req.Request}})
 
 	// re := regexp.MustCompile(`<think>(.*?)</think>`)
