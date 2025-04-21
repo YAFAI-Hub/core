@@ -4,6 +4,7 @@ import (
 	//"fmt"
 	"bytes"
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"text/template"
@@ -22,7 +23,7 @@ func (o *YafaiOrchestrator) SetupPrompt() (prompt string, err error) {
 	if err != nil {
 		slog.Error(err.Error())
 	}
-	var orch_data = OrchestratorPromptStruct{ChatRecords: chats, Confirmation: "not confirmed", Scope: o.Scope}
+	var orch_data = OrchestratorPromptStruct{Agents: o.GetAgentInfo(), ChatRecords: chats, Confirmation: "not confirmed", Scope: o.Scope}
 
 	var system_prompt_string bytes.Buffer
 
@@ -35,9 +36,17 @@ func (o *YafaiOrchestrator) SetupPrompt() (prompt string, err error) {
 
 }
 
-func (o *YafaiOrchestrator) GetInfo() (name string, description string) {
+func (o *YafaiOrchestrator) GetAgentInfo() (agents string) {
+	var agentsBuilder strings.Builder
+	for _, agent := range o.Team {
+
+		agentsBuilder.WriteString("Name : " + agent.Name + "\n")
+		agentsBuilder.WriteString("Description: " + agent.Description + "\n")
+		agentsBuilder.WriteString("Capabilities: " + agent.Capabilities + "\n")
+		agentsBuilder.WriteString("-----\n")
+	}
 	// Implement the initialization logic for the agent
-	return o.Name, o.Description
+	return agentsBuilder.String()
 }
 
 func (o *YafaiOrchestrator) getChatHistory() (chats string, err error) {
@@ -90,7 +99,7 @@ func (o *YafaiOrchestrator) Execute(ctx context.Context, req *YafaiRequest) (res
 	system_request := providers.RequestMessage{Role: "system", Content: sys_prompt}
 	user_request := providers.RequestMessage{Role: "user", Content: req.Request.Content}
 
-	provider_req := providers.GenAIProviderRequest{Model: o.Model, Messages: []providers.RequestMessage{system_request, user_request}, Stream: false}
+	provider_req := providers.GenAIProviderRequest{Model: o.Model, Messages: []providers.RequestMessage{system_request, user_request}, Stream: false, ResponseFormat: &providers.ResponseFormat{Type: "json_object"}}
 	completion, err := provider.Generate(ctx, client, provider_req)
 	payload := &providers.ResponseMessage{Role: "assistant", Content: completion.Choices[0].Message.Content}
 	payload.Content = strings.ReplaceAll(payload.Content, "\\", "")
@@ -98,40 +107,20 @@ func (o *YafaiOrchestrator) Execute(ctx context.Context, req *YafaiRequest) (res
 	return &YafaiResponse{Source: "orchestrator", Response: payload}, err
 }
 
-func (o *YafaiOrchestrator) Parse(ctx context.Context, agent_log map[string]string) (response string, err error) {
-	// Implement the logic to prepare orchestrator based on agent logs.
-	synth_tmpl, err := template.New("OrchSynth").Parse(templates.SynthPrompt)
-	if err != nil {
-		slog.Error(err.Error())
-	}
-	var synth_string bytes.Buffer
-	var builder strings.Builder
-	for name, log := range agent_log {
-		builder.WriteString("Name: " + name + "\n")
-		builder.WriteString("Output: " + log + "\n")
+func (o *YafaiOrchestrator) Parse(ctx context.Context, agentLogs []*ChatRecord) (string, error) {
+	slog.Info("Parsing final response and checking goal", "logs", agentLogs)
+	// Implement logic here to analyze the agent logs and determine if the overall goal
+	// has been achieved. This might involve another call to a language model
+	// that considers the entire interaction.
+	finalResponse := "Agent Activity:\n"
+	for agent, log := range agentLogs {
+		finalResponse += fmt.Sprintf("--- %s ---\n%s\n", agent, log)
 	}
 
-	logs := AgentLogs{AgentLogs: builder.String()}
-	err = synth_tmpl.Execute(&synth_string, logs)
-	if err != nil {
-		slog.Error(err.Error())
+	// Example logic for goal checking - replace with your actual implementation
+	if strings.Contains(strings.ToLower(finalResponse), "goal achieved") || strings.Contains(strings.ToLower(finalResponse), "done") {
+		return finalResponse + "\nGoal Achieved.", nil
+	} else {
+		return finalResponse + "\nGoal Not Yet Achieved.", nil
 	}
-
-	//synth_prompt, err :=
-	if err != nil {
-		slog.Error(err.Error())
-	}
-	provider := providers.GetProvider(o.Provider)
-	client := provider.Init()
-	system_request := providers.RequestMessage{Role: "system", Content: synth_string.String()}
-	user_request := providers.RequestMessage{Role: "user", Content: "analyse the agent logs and give final answer"}
-
-	provider_req := providers.GenAIProviderRequest{Model: o.Model, Messages: []providers.RequestMessage{system_request, user_request}, Stream: false}
-	completion, err := provider.Generate(ctx, client, provider_req)
-	if err != nil {
-		slog.Error(err.Error())
-	}
-	payload := &providers.ResponseMessage{Role: "assistant", Content: completion.Choices[0].Message.Content}
-	payload.Content = strings.ReplaceAll(payload.Content, "\\", "")
-	return payload.Content, nil
 }

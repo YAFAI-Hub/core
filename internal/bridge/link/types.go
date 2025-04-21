@@ -1,8 +1,10 @@
 package link
 
-import "yafai/internal/bridge/wsp"
+import (
+	"google.golang.org/grpc"
+)
 
 type LinkServer struct {
 	UnimplementedChatServiceServer
-	WspStream wsp.WorkspaceService_LinkStreamClient
+	WspConn *grpc.ClientConn
 }

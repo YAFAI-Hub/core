@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -141,23 +142,10 @@ func StartLink(ctx context.Context) (err error) {
 
 	l := grpc.NewServer()
 
-	conn, err := grpc.NewClient("localhost:7002", grpc.WithInsecure())
+	linkServer, err := link.NewLinkServer("localhost:7002")
 	if err != nil {
-		slog.Error("Failed to connect to gRPC server", "error", err)
-		return err
+		slog.Error("Link server creation failed.")
 	}
-
-	defer conn.Close()
-
-	client := wsp.NewWorkspaceServiceClient(conn)
-
-	wsp_stream, err := client.LinkStream(context.Background())
-	if err != nil {
-		slog.Error("Failed to open chat stream", "error", err)
-		return err
-	}
-
-	linkServer := &link.LinkServer{WspStream: wsp_stream}
 
 	link.RegisterChatServiceServer(l, linkServer)
 	reflection.Register(l)
@@ -211,19 +199,33 @@ func StartWsp(ctx context.Context, wspConfig *workspace.Workspace) (err error) {
 func RunClient(wsp *workspace.Workspace) error {
 
 	app := tview.NewApplication()
-	title := fmt.Sprintf("[yellow::b] YAFAI - %s workspace", wsp.Name)
+	title := fmt.Sprintf("[yellow::b] YAFAI - %s workspace", wsp.Name) // Assuming wsp is defined
+
 	// Top banner with YAFAI heading
 	banner := tview.NewTextView().
 		SetTextAlign(tview.AlignCenter).
 		SetDynamicColors(true)
 	banner.SetText(title).SetBorder(true)
 
-	// Side view for traces
+	// Side view for traces (now occupies 70% of left column height)
 	sideView := tview.NewTextView().
 		SetDynamicColors(true).
 		SetScrollable(true).
 		SetWrap(true)
-	sideView.SetBorder(true).SetTitle(" System Trace ")
+	sideView.SetBorder(true).SetTitle(" System Trace ") // Keep original title
+
+	// Status view (new, below sideView, occupies 30% of left column height)
+	statusView := tview.NewTextView().
+		SetDynamicColors(true).
+		SetScrollable(true). // Ensure it's scrollable
+		SetWrap(true)
+	statusView.SetBorder(true).SetTitle(" Status ") // Title for status view
+
+	// Vertical Flex container for the left column (SideView above StatusView)
+	leftColumnContainer := tview.NewFlex().
+		SetDirection(tview.FlexRow).     // Arrange items vertically
+		AddItem(sideView, 0, 7, false).  // sideView takes 70% height (weight 7)
+		AddItem(statusView, 0, 3, false) // statusView takes 30% height (weight 3)
 
 	// Chat view for messages
 	chatView := tview.NewTextView().
@@ -236,14 +238,6 @@ func RunClient(wsp *workspace.Workspace) error {
 		app.Draw()
 	})
 
-	// Track width of chatView
-	// var chatWidth int
-	// chatView.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-	// 	_, _, w, _ := chatView.GetInnerRect()
-	// 	chatWidth = w
-	// 	return event
-	// })
-
 	// Input field for user
 	inputField := tview.NewInputField().
 		SetLabel("You: ").
@@ -252,27 +246,27 @@ func RunClient(wsp *workspace.Workspace) error {
 	inputField.SetFieldBackgroundColor(tcell.ColorDefault)
 	inputField.SetFieldTextColor(tcell.ColorWhite)
 
-	// Container for chat messages & input
+	// Container for chat messages & input (right column)
 	chatContainer := tview.NewFlex().
 		SetDirection(tview.FlexRow).
 		AddItem(chatView, 0, 1, false).
 		AddItem(inputField, 3, 0, true)
 
-	// Split view (left: system trace, right: chat)
+	// Split view (left: leftColumnContainer, right: chatContainer)
+	// This maintains the horizontal split, e.g., 30% for the combined left column
 	splitContainer := tview.NewFlex().
-		SetDirection(tview.FlexColumn).
-		AddItem(sideView, 0, 3, false).
-		AddItem(chatContainer, 0, 10, true)
+		SetDirection(tview.FlexColumn).            // Arrange items horizontally
+		AddItem(leftColumnContainer, 0, 3, false). // Combined left column takes 30% (weight 3)
+		AddItem(chatContainer, 0, 7, true)         // Chat container takes 70% (weight 7)
 
 	// Frame with padding and borders
 	mainFrame := tview.NewFrame(splitContainer).SetBorders(1, 1, 2, 2, 1, 1)
 
 	// Full layout (banner + main)
 	layout := tview.NewFlex().
-		SetDirection(tview.FlexRow).
+		SetDirection(tview.FlexRow). // Arrange items vertically
 		AddItem(banner, 3, 0, false).
-		AddItem(mainFrame, 0, 1, true)
-
+		AddItem(mainFrame, 0, 1, true) // mainFrame takes remaining height
 	// gRPC connection
 	conn, err := grpc.NewClient("localhost:7001", grpc.WithInsecure())
 	if err != nil {
@@ -323,11 +317,18 @@ func RunClient(wsp *workspace.Workspace) error {
 
 			// 	continue
 			// }
-			serverMsg := "YAFAI: \n" + resp.Response
-			chatView.Write([]byte("\n[green]" + serverMsg + "\n\n"))
-			sideView.Write([]byte("[orange]" + resp.Trace + "\n"))
-			chatView.Write([]byte("[white]----------------------------------------\n"))
+			if !strings.Contains(resp.Response, "STATUS:") {
+				serverMsg := "YAFAI: \n" + resp.Response
+				chatView.Write([]byte("\n[green]" + serverMsg + "\n\n"))
+				sideView.Write([]byte("[orange]" + resp.Trace + "\n"))
+				chatView.Write([]byte("[white]----------------------------------------\n"))
+			} else {
+				serverMsg := resp.Response
+				statusView.Write([]byte("\n[white]" + serverMsg + "\n"))
+				//statusView.Write([]byte("\n[white]" + resp.StatusUpdate.Trace + "\n"))
+			}
 		}
+
 	}()
 
 	// Run app

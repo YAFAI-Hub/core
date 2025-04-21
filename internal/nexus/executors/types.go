@@ -2,6 +2,7 @@ package executors
 
 import (
 	"context"
+	"yafai/internal/bridge/skill"
 	"yafai/internal/nexus/providers"
 )
 
@@ -14,20 +15,23 @@ type ILLMActor interface {
 }
 
 type YafaiAgent struct {
-	Name          string                   `yaml:"name"`
-	Description   string                   `yaml:"description"`
-	Capabilities  string                   `yaml:"capabilities,omitempty"`
-	Model         string                   `yaml:"model"`
-	Provider      string                   `yaml:"provider"`
-	GenAIProvider providers.GenAIProvider  `yaml:"provider_obj,omitempty"`
-	Goal          string                   `yaml:"goal"`
-	DependsOn     string                   `yaml:"depends"`
-	RespondsTo    string                   `yaml:"responds"`
-	SysPrompt     string                   `yaml:"sys_prompt,omitempty"`
-	Tools         []providers.ToolFunction `yaml:"tools,omitempty"`
+	Name          string                  `yaml:"name"`
+	Description   string                  `yaml:"description"`
+	Capabilities  string                  `yaml:"capabilities,omitempty"`
+	Model         string                  `yaml:"model"`
+	Provider      string                  `yaml:"provider"`
+	GenAIProvider providers.GenAIProvider `yaml:"provider_obj,omitempty"`
+	Goal          string                  `yaml:"goal"`
+	DependsOn     string                  `yaml:"depends"`
+	RespondsTo    string                  `yaml:"responds"`
+	SysPrompt     string                  `yaml:"sys_prompt,omitempty"`
+	Actions       []*skill.Action
+	Tools         []providers.LLMTool `yaml:"tools,omitempty"`
+	History       []*ChatRecord       `json:"history,omitempty"`
 	//Integrations  map[string]interface{}   `yaml:"integrations"`
-	Status   string            `yaml:"status"`
-	Metadata map[string]string `yaml:"metadata,omitempty"`
+	SkillClient skill.SkillServiceClient
+	Status      string            `yaml:"status"`
+	Metadata    map[string]string `yaml:"metadata,omitempty"`
 }
 
 type YafaiOrchestrator struct {
@@ -71,6 +75,7 @@ type ChatRecord struct {
 }
 
 type OrchestratorPromptStruct struct {
+	Agents       string
 	ChatRecords  string
 	Confirmation string
 	Scope        string
@@ -111,7 +116,15 @@ type ToolDescription struct {
 	Description string
 }
 
-type ToolsStruct struct {
+var AgentReactStep struct {
+	Thought     string               `json:"thought"`
+	Action      string               `json:"action"`
+	Input       interface{}          `json:"input"`
+	FinalAnswer string               `json:"final_answer"`
+	ToolCalls   []providers.ToolCall `json:"tool_calls"`
+}
+
+type AgentTemplateStruct struct {
 	Tools       string
 	ChatHistory string
 	Scratchpad  string
@@ -124,13 +137,31 @@ type OrchReactStep struct {
 	Observation string
 }
 
-type AgentReactStep struct {
-	Thought     string
-	Action      string
-	Input       string
-	Observation string
-}
-
 type AgentLogs struct {
 	AgentLogs string
+}
+
+type Param struct {
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	In          string `json:"in"`
+	Description string `json:"description"`
+	Required    bool   `json:"required"`
+}
+
+type Action struct {
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	Method      string            `json:"method"`
+	BaseURL     string            `json:"baseUrl"`
+	Path        string            `json:"path"`
+	Headers     map[string]string `json:"headers"`
+	Params      []Param           `json:"params"`
+}
+
+type ToolExecutionInput struct {
+	Name        string            `json:"name"`
+	QueryParams map[string]string `json:"queryParams"`
+	PathParams  map[string]string `json:"pathParams"`
+	BodyParams  map[string]string `json:"bodyParams"`
 }
