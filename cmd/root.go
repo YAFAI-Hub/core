@@ -155,6 +155,7 @@ func StartLink(ctx context.Context) (err error) {
 		<-ctx.Done()
 		slog.Info("Shutting down YAFAI link...")
 		l.GracefulStop()
+		slog.Info("Yafai Link graceful shudown complete.")
 	}()
 
 	slog.Info("YAFAI link listening on port :7001")
@@ -185,6 +186,7 @@ func StartWsp(ctx context.Context, wspConfig *workspace.Workspace) (err error) {
 		<-ctx.Done()
 		slog.Info("Shutting down YAFAI Workspace...")
 		s.GracefulStop()
+		slog.Info("Yafai Workspace graceful shudown complete.")
 	}()
 
 	slog.Info("YAFAI link listening on port :7002")
@@ -196,7 +198,7 @@ func StartWsp(ctx context.Context, wspConfig *workspace.Workspace) (err error) {
 	return nil
 }
 
-func RunClient(wsp *workspace.Workspace) error {
+func RunClient(ctx context.Context, wsp *workspace.Workspace) error {
 
 	app := tview.NewApplication()
 	title := fmt.Sprintf("[yellow::b] YAFAI - %s workspace", wsp.Name) // Assuming wsp is defined
@@ -331,6 +333,14 @@ func RunClient(wsp *workspace.Workspace) error {
 
 	}()
 
+	// Handle graceful shutdown
+	go func() {
+		<-ctx.Done()
+		slog.Info("Shutting down TUI...")
+		app.Stop()
+		slog.Info("Yafai TUI graceful shudown complete.")
+	}()
+
 	// Run app
 	if err := app.SetRoot(layout, true).SetFocus(inputField).EnableMouse(true).Run(); err != nil {
 		slog.Error("application finished with error", "error", err)
@@ -432,7 +442,7 @@ func StartYafai(env string, mode string, configsPath string) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			err := RunClient(wsp)
+			err := RunClient(ctx, wsp)
 			if err != nil {
 				slog.Error("Error starting YAFAI client: %v", err.Error(), nil)
 				cancel()

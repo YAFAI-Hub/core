@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"os/signal"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 	"yafai/internal/nexus/executors"
 	"yafai/internal/nexus/providers"
@@ -41,12 +44,21 @@ func (s *WorkspaceServer) LinkStream(stream WorkspaceService_LinkStreamServer) (
 	connID := fmt.Sprintf("conn_%d", time.Now().UnixNano())
 	slog.Info("New client connected", "connection_id", connID)
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Listen for Ctrl+C (SIGINT/SIGTERM)
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
 	// Defer to log closure regardless of how the function exits.
 	defer func() {
-		slog.Info("Closing stream", "connection_id", connID)
+		go func() {
+			<-ctx.Done()
+			slog.Info("Context canceled, shutting down")
+			slog.Info("Closing stream", "connection_id", connID)
+		}()
 	}()
-
-	ctx := stream.Context() // Use the stream's context for cancellable operations
 
 	// Outer loop: Receive packets from the client
 	for {
