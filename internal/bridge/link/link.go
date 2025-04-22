@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 	wsp "yafai/internal/bridge/wsp"
 
@@ -39,7 +42,20 @@ func (l *LinkServer) ChatStream(stream ChatService_ChatStreamServer) (err error)
 	connID := fmt.Sprintf("conn_%d", time.Now().UnixNano())
 	slog.Info("New client connected", "connection_id", connID)
 	wspClient := wsp.NewWorkspaceServiceClient(l.WspConn)
-	wspStream, err := wspClient.LinkStream(context.Background())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Listen for Ctrl+C (SIGINT/SIGTERM)
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		<-sigChan
+		slog.Info("Shutdown signal received")
+		cancel() // triggers context cancellation
+	}()
+	wspStream, err := wspClient.LinkStream(ctx)
 
 	if err != nil {
 		slog.Error("Failed to create new stream")
@@ -87,8 +103,11 @@ func (l *LinkServer) ChatStream(stream ChatService_ChatStreamServer) (err error)
 	// Main loop: receive from client, send to workspace
 	for {
 		select {
+		case <-ctx.Done():
+			slog.Info("Context canceled, shutting down")
+			return nil
 		case err := <-errChan:
-			return err // Workspace goroutine error
+			return err
 		case <-doneChan:
 			return fmt.Errorf("workspace receiver goroutine exited unexpectedly")
 		default:
