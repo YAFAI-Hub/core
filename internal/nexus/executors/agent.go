@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"os"
 	"strings"
 	"text/template"
 	"time"
@@ -17,6 +18,8 @@ import (
 	"yafai/internal/nexus/providers"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 func ConvertActionsToLLMTools(actions []*skill.Action) []providers.LLMTool {
@@ -102,19 +105,6 @@ func (a *YafaiAgent) SetupPrompt() (prompt string, err error) {
 	return system_prompt_string.String(), err
 }
 
-func (a *YafaiAgent) getChatHistory() (chats string, err error) {
-
-	var historyBuilder strings.Builder
-	for _, record := range a.History {
-		historyBuilder.WriteString("From: " + record.From + "\n")
-		historyBuilder.WriteString("To: " + record.To + "\n")
-		historyBuilder.WriteString("Message: " + record.Message + "\n")
-		historyBuilder.WriteString("-----\n")
-	}
-	chats = historyBuilder.String()
-	return chats, nil
-}
-
 func (a *YafaiAgent) AppendChatRecord(From string, To string, Message string) error {
 	// Implement the logicto append a new chat record to the conversation history
 	record := &ChatRecord{From: From, To: To, Message: Message}
@@ -128,7 +118,7 @@ func (a *YafaiAgent) Parse() (err error) {
 }
 
 func (a *YafaiAgent) ConvertToolCallToExecutionInput(toolCall providers.ToolCall) (ToolExecutionInput, error) {
-	var argsMap map[string]string
+	var argsMap map[string]interface{}
 	err := json.Unmarshal([]byte(toolCall.Function.Arguments), &argsMap)
 	if err != nil {
 		return ToolExecutionInput{}, fmt.Errorf("failed to parse function arguments: %v", err)
@@ -147,9 +137,9 @@ func (a *YafaiAgent) ConvertToolCallToExecutionInput(toolCall providers.ToolCall
 	}
 
 	// Init all param maps
-	pathParams := make(map[string]string)
-	queryParams := make(map[string]string)
-	bodyParams := make(map[string]string)
+	pathParams := make(map[string]interface{})
+	queryParams := make(map[string]interface{})
+	bodyParams := make(map[string]interface{})
 
 	// Distribute params by "in" field
 	for _, param := range action.Params {
@@ -181,8 +171,13 @@ func (a *YafaiAgent) DiscoverTools() (err error) {
 		//slog.Info("Fetching tools and actions from memory")
 		return nil
 	}
-
-	conn, err := grpc.Dial("localhost:5001", grpc.WithInsecure(), grpc.WithBlock())
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get user home directory: %w", err)
+	}
+	skill_root := fmt.Sprintf("%s/.yafai/plugins/skill.sock", homeDir)
+	slog.Info(skill_root)
+	conn, err := grpc.Dial(fmt.Sprintf("unix:%s", skill_root), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Fatalf("did not connect: %v", err)
 	}
@@ -210,33 +205,110 @@ func (a *YafaiAgent) DiscoverTools() (err error) {
 }
 
 func (a *YafaiAgent) ExecuteTool(req ToolExecutionInput) (res *skill.ExecuteActionResponse, err error) {
-	//slog.Info("Recieved tool execution request: %v", req)
-	if len(req.QueryParams) == 0 {
-		//slog.Info("No Query params passed for the action")
-		req.QueryParams = nil // or make(map[string]string) if preferred
-	}
-	if len(req.PathParams) == 0 {
-		//slog.Info("No Path params passed for the action")
-		req.PathParams = nil
-	}
-	if len(req.BodyParams) == 0 {
-		//slog.Info("No Body params passed for the action")
-		req.BodyParams = nil
+	// Prepare the QueryParams as google.protobuf.Struct
+	queryParams := make(map[string]*structpb.Value)
+	if len(req.QueryParams) > 0 {
+		for key, value := range req.QueryParams {
+			switch v := value.(type) {
+			case string:
+				queryParams[key] = structpb.NewStringValue(v)
+			case bool:
+				queryParams[key] = structpb.NewBoolValue(v)
+			case float64:
+				queryParams[key] = structpb.NewNumberValue(v)
+			case []interface{}:
+				// Handle arrays
+				arrValues := make([]*structpb.Value, len(v))
+				for i, item := range v {
+					arrValues[i] = structpb.NewStringValue(fmt.Sprintf("%v", item)) // Can adjust based on actual item types
+				}
+				queryParams[key] = structpb.NewListValue(&structpb.ListValue{Values: arrValues})
+			default:
+				queryParams[key] = structpb.NewStringValue(fmt.Sprintf("%v", v))
+			}
+		}
 	}
 
-	conn, err := grpc.Dial("localhost:5001", grpc.WithInsecure(), grpc.WithBlock())
+	// Prepare the PathParams as google.protobuf.Struct
+	pathParams := make(map[string]*structpb.Value)
+	if len(req.PathParams) > 0 {
+		for key, value := range req.PathParams {
+			switch v := value.(type) {
+			case string:
+				pathParams[key] = structpb.NewStringValue(v)
+			case bool:
+				pathParams[key] = structpb.NewBoolValue(v)
+			case float64:
+				pathParams[key] = structpb.NewNumberValue(v)
+			case []interface{}:
+				// Handle arrays
+				arrValues := make([]*structpb.Value, len(v))
+				for i, item := range v {
+					arrValues[i] = structpb.NewStringValue(fmt.Sprintf("%v", item)) // Can adjust based on actual item types
+				}
+				pathParams[key] = structpb.NewListValue(&structpb.ListValue{Values: arrValues})
+			default:
+				pathParams[key] = structpb.NewStringValue(fmt.Sprintf("%v", v))
+			}
+		}
+	}
+
+	// Prepare the BodyParams as google.protobuf.Struct
+	bodyParams := make(map[string]*structpb.Value)
+	if len(req.BodyParams) > 0 {
+		for key, value := range req.BodyParams {
+			switch v := value.(type) {
+			case string:
+				bodyParams[key] = structpb.NewStringValue(v)
+			case bool:
+				bodyParams[key] = structpb.NewBoolValue(v)
+			case float64:
+				bodyParams[key] = structpb.NewNumberValue(v)
+			case []interface{}:
+				// Handle arrays
+				arrValues := make([]*structpb.Value, len(v))
+				for i, item := range v {
+					arrValues[i] = structpb.NewStringValue(fmt.Sprintf("%v", item)) // Can adjust based on actual item types
+				}
+				bodyParams[key] = structpb.NewListValue(&structpb.ListValue{Values: arrValues})
+			default:
+				bodyParams[key] = structpb.NewStringValue(fmt.Sprintf("%v", v))
+			}
+		}
+	}
+
+	// Set the home directory and socket path
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user home directory: %w", err)
+	}
+	skill_root := fmt.Sprintf("%s/.yafai/plugins/skill.sock", homeDir)
+	slog.Info(skill_root)
+
+	// Connect to the gRPC server
+	conn, err := grpc.Dial(fmt.Sprintf("unix:%s", skill_root), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Fatalf("did not connect: %v", err)
-		return nil, err
 	}
 	defer conn.Close()
 
 	// Create a new client
 	client := skill.NewSkillServiceClient(conn)
 
+	// Set the timeout context
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	response, err := client.ExecuteAction(ctx, &skill.ExecuteActionRequest{Name: req.Name, QueryParams: req.QueryParams, PathParams: req.PathParams, BodyParams: req.BodyParams})
+
+	// Construct the ExecuteActionRequest using google.protobuf.Struct
+	reqStruct := &skill.ExecuteActionRequest{
+		Name:        req.Name,
+		QueryParams: &structpb.Struct{Fields: queryParams},
+		PathParams:  &structpb.Struct{Fields: pathParams},
+		BodyParams:  &structpb.Struct{Fields: bodyParams},
+	}
+
+	// Call the ExecuteAction gRPC method
+	response, err := client.ExecuteAction(ctx, reqStruct)
 	if err != nil {
 		slog.Error(err.Error())
 		return nil, err
@@ -301,8 +373,15 @@ func (a *YafaiAgent) Execute(ctx context.Context, req *YafaiRequest) (*YafaiResp
 	const maxRetries = 5
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		// Build the system prompt: only relevant instructions for the agent
-		sysPrompt := a.BuildSystemPrompt()
 
+		sysPrompt, err := a.SetupPrompt()
+		if err != nil {
+			slog.Error("Failed to set up system prompt: %v", err)
+			return &YafaiResponse{Response: &providers.ResponseMessage{
+				Role:    "assistant",
+				Content: fmt.Sprintf("Error setting up system prompt: %v", err),
+			}}, err
+		}
 		// Include the message history in the conversation (not in system prompt)
 		conversationHistory := a.BuildConversationHistory()
 
@@ -355,7 +434,7 @@ func (a *YafaiAgent) Execute(ctx context.Context, req *YafaiRequest) (*YafaiResp
 			}}, nil
 		}
 
-		slog.Info("Tools added : %+v", a.Tools)
+		// slog.Info("Tools added : %+v", a.Tools)
 		slog.Info("LLM Response : %+v", msg)
 
 		// Handle tool invocation

@@ -46,11 +46,12 @@ func ParseConfig(path string) *workspace.Workspace {
 		slog.Error(err.Error())
 	}
 
-	for _, member := range config.Orchestrator.Team {
+	for name, member := range config.Orchestrator.Team {
+		member.Name = name
 		config.Planner.Agents = append(config.Planner.Agents, member)
 	}
 	// planner := &executors.YafaiPlanner{Agents: config.Team, Model: config.Planner.Model }
-
+	slog.Info("Parsed config", "config", config)
 	workspace := workspace.Workspace{
 		Name:         config.Name,
 		Scope:        config.Scope,

@@ -4,6 +4,8 @@ option go_package = ".;skill";
 
 package skill;
 
+import "google/protobuf/struct.proto";
+
 service SkillService {
   rpc GetActions (GetActionRequest) returns (GetActionsResponse);
   rpc ExecuteAction (ExecuteActionRequest) returns (ExecuteActionResponse);
@@ -35,11 +37,13 @@ message Parameter {
   bool required = 5;
 }
 
+
+
 message ExecuteActionRequest {
   string name = 1; // Name of the action to execute
-  map<string, string> queryParams = 2;
-  map<string, string> bodyParams = 3; // Represent body parameters as a map
-  map<string, string> pathParams = 4; // For parameters in the URL path
+  google.protobuf.Struct queryParams = 2;
+  google.protobuf.Struct bodyParams = 3; // Represent body parameters as a map
+  google.protobuf.Struct pathParams = 4; // For parameters in the URL path
 }
 
 message ExecuteActionResponse {

@@ -15,7 +15,7 @@ type ILLMActor interface {
 }
 
 type YafaiAgent struct {
-	Name          string                  `yaml:"name"`
+	Name          string                  `yaml:"-"`
 	Description   string                  `yaml:"description"`
 	Capabilities  string                  `yaml:"capabilities,omitempty"`
 	Model         string                  `yaml:"model"`
@@ -160,8 +160,8 @@ type Action struct {
 }
 
 type ToolExecutionInput struct {
-	Name        string            `json:"name"`
-	QueryParams map[string]string `json:"queryParams"`
-	PathParams  map[string]string `json:"pathParams"`
-	BodyParams  map[string]string `json:"bodyParams"`
+	Name        string                 `json:"name"`
+	QueryParams map[string]interface{} `json:"queryParams"`
+	PathParams  map[string]interface{} `json:"pathParams"`
+	BodyParams  map[string]interface{} `json:"bodyParams"`
 }
