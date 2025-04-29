@@ -65,7 +65,7 @@ func setupYafai(env string) (err error) {
 
 	yafaiRoot := fmt.Sprintf("%s/.yafai", homeDir)
 	configsDir := fmt.Sprintf("%s/configs", yafaiRoot)
-
+	//skillsDir := fmt.Sprintf("%s/skills", yafaiRoot)
 	envPath := fmt.Sprintf("%s/.env", yafaiRoot)
 
 	// Check if .yafai directory exists, create if not
@@ -83,6 +83,15 @@ func setupYafai(env string) (err error) {
 		}
 		slog.Info("Created .yafai/configs directory", "path", configsDir)
 	}
+
+	// Check if .yafai/skills directory exists, create if not
+	if _, err := os.Stat(configsDir); os.IsNotExist(err) {
+		if err := os.Mkdir(configsDir, 0755); err != nil {
+			return fmt.Errorf("failed to create .yafai/configs directory: %w", err)
+		}
+		slog.Info("Created .yafai/configs directory", "path", configsDir)
+	}
+
 	// Check if the .env file exists
 	if _, err := os.Stat(envPath); os.IsNotExist(err) {
 		// Create the .env file

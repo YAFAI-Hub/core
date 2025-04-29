@@ -77,6 +77,8 @@ func (s *WorkspaceServer) LinkStream(stream WorkspaceService_LinkStreamServer) (
 		currentRequest := packet.Request
 
 		// ReACT loop for this packet
+		iterationCount := 0
+
 		for {
 			// Check for cancellation
 			select {
@@ -153,6 +155,16 @@ func (s *WorkspaceServer) LinkStream(stream WorkspaceService_LinkStreamServer) (
 					currentRequest = fmt.Sprintf("Previous agent '%s' executed task '%s' with result: '%s'. What's next?", name, task, content)
 				}
 				// Next iteration of the ReACT loop uses updated currentRequest
+				iterationCount++
+
+				// If no new response or excessive iterations, terminate the loop
+				if iterationCount > 3 {
+					slog.Warn("Excessive iterations or no progress made, terminating the loop.")
+					stream.Send(&LinkResponse{Response: "Task could not be completed due to repeated failures or no progress."})
+					break
+				}
+
+				//lastResponse = currentRequest
 				continue
 			}
 
@@ -170,6 +182,7 @@ func (s *WorkspaceServer) LinkStream(stream WorkspaceService_LinkStreamServer) (
 		}
 		// Inner loop ends; wait for next packet
 	}
+
 	// End of outer receive packet loop
 }
 
