@@ -142,11 +142,13 @@ type AgentLogs struct {
 }
 
 type Param struct {
-	Name        string `json:"name"`
-	Type        string `json:"type"`
-	In          string `json:"in"`
-	Description string `json:"description"`
-	Required    bool   `json:"required"`
+	Name        string  `json:"name"`
+	Type        string  `json:"type"`        // The data type (e.g., string, integer, array)
+	In          string  `json:"in"`          // Specifies where the param appears (query, body, path)
+	Description string  `json:"description"` // Description of the parameter
+	Required    bool    `json:"required"`    // Whether the param is required
+	Properties  []Param `json:"properties"`  // Nested parameters for complex types (objects)
+	Items       []Param `json:"items"`       // Items for array-type parameters
 }
 
 type Action struct {
