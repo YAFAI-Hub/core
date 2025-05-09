@@ -1,0 +1,27 @@
+name: "Hubspot"
+scope: "CRM"
+orchestrator:
+  name: "crm"
+  description: "Handles hubspot crm tasks via natural conversation"
+  scope: "Empowers users to manage customer relationships and tasks with minimal input"
+  model: "llama-3.3-70b-versatile"
+  provider: "groq"
+  goal: "Deliver intelligent, streamlined CRM + task execution through AI-led conversation"
+  team:
+    deals_agent:
+      capabilities: "create deals, update deal stages, fetch deal details, delete obsolete deals"
+      description: |
+        "Manages the sales pipeline by assisting with deal creation, monitoring deal progress through different stages, and ensuring timely updates to deal information. This agent helps sales teams track the status of deals and move them through stages, from initial lead to closed deal."
+      model: "deepseek-r1-distill-llama-70b"
+      provider: "groq"
+      goal: "Optimize sales process and deal tracking by providing real-time insights, automating repetitive tasks, and ensuring no deals are left behind."
+      status: "Initialized"
+
+    contacts_agent:
+      capabilities: "create contacts, update contact information, fetch contact details, delete duplicate contacts"
+      description: |
+        "Maintains comprehensive contact profiles by ensuring that all relevant contact information is accurate, up-to-date, and easily accessible. This agent supports the creation and modification of contact records, while also assisting in the elimination of duplicates and maintaining accurate relationship histories."
+      model: "deepseek-r1-distill-llama-70b"
+      provider: "groq"
+      goal: "Ensure accurate and up-to-date contact management, improve relationship history tracking, and enhance communication across teams by eliminating data redundancies."
+      status: "Initialized"
