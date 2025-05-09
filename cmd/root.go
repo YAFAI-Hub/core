@@ -435,6 +435,8 @@ func StartYafai(env string, mode string, configsPath string) error {
 			slog.Error("Error starting YAFAI link: %v", err.Error(), nil)
 			cancel()
 		}
+		slog.Info("YAFAI link started successfully")
+		slog.Info("YAFAI link listening on port :7001")
 	}()
 
 	wg.Add(1)
@@ -442,9 +444,10 @@ func StartYafai(env string, mode string, configsPath string) error {
 		defer wg.Done()
 		err := StartWsp(ctx, wsp)
 		if err != nil {
-			slog.Error("Error starting YAFAI link: %v", err.Error(), nil)
+			slog.Error("Error starting YAFAI Workspace: %v", err.Error(), nil)
 			cancel()
 		}
+		slog.Info("YAFAI link started successfully")
 	}()
 
 	if mode == "tui" {

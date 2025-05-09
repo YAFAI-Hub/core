@@ -27,9 +27,12 @@ type LLMFunctionParameters struct {
 }
 
 type LLMProperty struct {
-	Type        string   `json:"type"`
-	Description string   `json:"description"`
-	Enum        []string `json:"enum,omitempty"` // optional
+	Type        string                 `json:"type"`
+	Description string                 `json:"description,omitempty"`
+	Enum        []string               `json:"enum,omitempty"`
+	Properties  map[string]LLMProperty `json:"properties,omitempty"` // for objects
+	Required    []string               `json:"required,omitempty"`   // for objects
+	Items       *LLMProperty           `json:"items,omitempty"`      // for arrays
 }
 
 type ToolCallFunc struct {

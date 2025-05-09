@@ -22,23 +22,62 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
+func buildProperties(params []*skill.Parameter) (map[string]providers.LLMProperty, []string) {
+	properties := make(map[string]providers.LLMProperty)
+	var required []string
+
+	for _, param := range params {
+		prop := providers.LLMProperty{
+			Type:        param.Type,
+			Description: param.Description,
+		}
+
+		// If the parameter has enum values, include them in the property
+		if len(param.Enum) > 0 {
+			prop.Enum = param.Enum
+		}
+
+		// Handle properties (nested parameters for objects and arrays)
+		if len(param.Properties) > 0 || len(param.Items) > 0 {
+			var subProps map[string]providers.LLMProperty
+			var subRequired []string
+
+			// If the parameter is an array, handle its Items (nested properties of the array elements)
+			if param.Type == "array" {
+				subProps, subRequired = buildProperties(param.Items)
+				prop.Items = &providers.LLMProperty{
+					Type:       "object", // Arrays contain objects (or can be expanded)
+					Properties: subProps,
+					Required:   subRequired,
+				}
+			} else if param.Type == "object" {
+				// If the parameter is an object, handle its Properties recursively
+				subProps, subRequired = buildProperties(param.Properties)
+				prop.Properties = subProps
+				prop.Required = subRequired
+			}
+		}
+
+		// Store the final property in the map
+		properties[param.Name] = prop
+
+		// Collect required fields
+		if param.Required {
+			required = append(required, param.Name)
+		}
+	}
+
+	return properties, required
+}
+
 func ConvertActionsToLLMTools(actions []*skill.Action) []providers.LLMTool {
 	var tools []providers.LLMTool
 
 	for _, action := range actions {
-		props := make(map[string]providers.LLMProperty)
-		var requiredFields []string
+		// Convert properties and collect required fields using the external function
+		props, requiredFields := buildProperties(action.Params)
 
-		for _, param := range action.Params {
-			props[param.Name] = providers.LLMProperty{
-				Type:        param.Type,
-				Description: param.Description,
-			}
-			if param.Required {
-				requiredFields = append(requiredFields, param.Name)
-			}
-		}
-
+		// Create the tool from the action
 		tool := providers.LLMTool{
 			Type: "function",
 			Function: providers.LLMFunction{
@@ -51,6 +90,8 @@ func ConvertActionsToLLMTools(actions []*skill.Action) []providers.LLMTool {
 				},
 			},
 		}
+
+		// Append the tool to the list
 		tools = append(tools, tool)
 	}
 
@@ -124,7 +165,7 @@ func (a *YafaiAgent) ConvertToolCallToExecutionInput(toolCall providers.ToolCall
 		return ToolExecutionInput{}, fmt.Errorf("failed to parse function arguments: %v", err)
 	}
 
-	// Find the corresponding action
+	// Find matching action
 	var action *skill.Action
 	for _, act := range a.Actions {
 		if act.Name == toolCall.Function.Name {
@@ -136,24 +177,65 @@ func (a *YafaiAgent) ConvertToolCallToExecutionInput(toolCall providers.ToolCall
 		return ToolExecutionInput{}, fmt.Errorf("action metadata not found for: %s", toolCall.Function.Name)
 	}
 
-	// Init all param maps
+	// Initialize param buckets
 	pathParams := make(map[string]interface{})
 	queryParams := make(map[string]interface{})
 	bodyParams := make(map[string]interface{})
 
-	// Distribute params by "in" field
+	// Recursive function to collect nested values
+	var extractValue func(param *skill.Parameter, value interface{}) interface{}
+	extractValue = func(param *skill.Parameter, value interface{}) interface{} {
+		if value == nil || len(param.Properties) == 0 {
+			return value
+		}
+
+		switch param.Type {
+		case "object":
+			// Recurse into object properties
+			valMap, ok := value.(map[string]interface{})
+			if !ok {
+				return value
+			}
+			result := make(map[string]interface{})
+			for _, subParam := range param.Properties {
+				if subVal, exists := valMap[subParam.Name]; exists {
+					result[subParam.Name] = extractValue(subParam, subVal)
+				}
+			}
+			return result
+
+		case "array":
+			// Recurse into each element
+			valSlice, ok := value.([]interface{})
+			if !ok {
+				return value
+			}
+			var result []interface{}
+			for _, item := range valSlice {
+				result = append(result, extractValue(param.Properties[0], item))
+			}
+			return result
+
+		default:
+			return value
+		}
+	}
+
+	// Distribute parameters based on "in" field
 	for _, param := range action.Params {
 		val, exists := argsMap[param.Name]
 		if !exists {
 			continue
 		}
+		extracted := extractValue(param, val)
+
 		switch param.In {
 		case "path":
-			pathParams[param.Name] = val
+			pathParams[param.Name] = extracted
 		case "query":
-			queryParams[param.Name] = val
+			queryParams[param.Name] = extracted
 		case "body":
-			bodyParams[param.Name] = val
+			bodyParams[param.Name] = extracted
 		}
 	}
 
@@ -204,137 +286,142 @@ func (a *YafaiAgent) DiscoverTools() (err error) {
 	return err
 }
 
-func (a *YafaiAgent) ExecuteTool(req ToolExecutionInput) (res *skill.ExecuteActionResponse, err error) {
-	// Prepare the QueryParams as google.protobuf.Struct
-	queryParams := make(map[string]*structpb.Value)
-	if len(req.QueryParams) > 0 {
-		for key, value := range req.QueryParams {
-			switch v := value.(type) {
-			case string:
-				queryParams[key] = structpb.NewStringValue(v)
-			case bool:
-				queryParams[key] = structpb.NewBoolValue(v)
-			case float64:
-				queryParams[key] = structpb.NewNumberValue(v)
-			case []interface{}:
-				// Handle arrays
-				arrValues := make([]*structpb.Value, len(v))
-				for i, item := range v {
-					arrValues[i] = structpb.NewStringValue(fmt.Sprintf("%v", item)) // Can adjust based on actual item types
-				}
-				queryParams[key] = structpb.NewListValue(&structpb.ListValue{Values: arrValues})
-			default:
-				queryParams[key] = structpb.NewStringValue(fmt.Sprintf("%v", v))
+func toStructPB(value interface{}) (*structpb.Value, error) {
+	switch v := value.(type) {
+	case string:
+		return structpb.NewStringValue(v), nil
+	case bool:
+		return structpb.NewBoolValue(v), nil
+	case float64:
+		return structpb.NewNumberValue(v), nil
+	case []interface{}:
+		// Handle arrays (convert each element to structpb.Value)
+		list := make([]*structpb.Value, len(v))
+		for i, item := range v {
+			pbVal, err := toStructPB(item) // Recursively handle each element
+			if err != nil {
+				return nil, err
 			}
+			list[i] = pbVal
+		}
+		return structpb.NewListValue(&structpb.ListValue{Values: list}), nil
+	case map[string]interface{}:
+		// Handle maps (convert each key-value pair to structpb.Value)
+		fields := map[string]*structpb.Value{}
+		for key, item := range v {
+			pbVal, err := toStructPB(item) // Recursively handle nested maps
+			if err != nil {
+				return nil, err
+			}
+			fields[key] = pbVal
+		}
+		return structpb.NewStructValue(&structpb.Struct{Fields: fields}), nil
+	default:
+		// Default case for unknown types (convert to string)
+		return structpb.NewStringValue(fmt.Sprintf("%v", v)), nil
+	}
+}
+
+func (a *YafaiAgent) ExecuteTool(req ToolExecutionInput) (*skill.ExecuteActionResponse, error) {
+	// Helper: Convert any interface{} to *structpb.Value for protobuf
+	toStructPB := func(value interface{}) (*structpb.Value, error) {
+		switch v := value.(type) {
+		case string:
+			return structpb.NewStringValue(v), nil
+		case bool:
+			return structpb.NewBoolValue(v), nil
+		case float64:
+			return structpb.NewNumberValue(v), nil
+		case []interface{}:
+			// Handle arrays (convert each element to structpb.Value)
+			list := make([]*structpb.Value, len(v))
+			for i, item := range v {
+				pbVal, err := toStructPB(item) // Recursively handle each element
+				if err != nil {
+					return nil, err
+				}
+				list[i] = pbVal
+			}
+			return structpb.NewListValue(&structpb.ListValue{Values: list}), nil
+		case map[string]interface{}:
+			// Handle maps (convert each key-value pair to structpb.Value)
+			fields := make(map[string]*structpb.Value)
+			for key, item := range v {
+				pbVal, err := toStructPB(item) // Recursively handle nested maps
+				if err != nil {
+					return nil, err
+				}
+				fields[key] = pbVal
+			}
+			return structpb.NewStructValue(&structpb.Struct{Fields: fields}), nil
+		default:
+			// Default case for unknown types (convert to string)
+			return structpb.NewStringValue(fmt.Sprintf("%v", v)), nil
 		}
 	}
 
-	// Prepare the PathParams as google.protobuf.Struct
-	pathParams := make(map[string]*structpb.Value)
-	if len(req.PathParams) > 0 {
-		for key, value := range req.PathParams {
-			switch v := value.(type) {
-			case string:
-				pathParams[key] = structpb.NewStringValue(v)
-			case bool:
-				pathParams[key] = structpb.NewBoolValue(v)
-			case float64:
-				pathParams[key] = structpb.NewNumberValue(v)
-			case []interface{}:
-				// Handle arrays
-				arrValues := make([]*structpb.Value, len(v))
-				for i, item := range v {
-					arrValues[i] = structpb.NewStringValue(fmt.Sprintf("%v", item)) // Can adjust based on actual item types
-				}
-				pathParams[key] = structpb.NewListValue(&structpb.ListValue{Values: arrValues})
-			default:
-				pathParams[key] = structpb.NewStringValue(fmt.Sprintf("%v", v))
+	// Helper: Convert map[string]interface{} to Struct fields
+	convertMap := func(input map[string]interface{}) (map[string]*structpb.Value, error) {
+		fields := make(map[string]*structpb.Value)
+		for key, val := range input {
+			pbVal, err := toStructPB(val)
+			if err != nil {
+				return nil, fmt.Errorf("failed to convert key '%s': %w", key, err)
 			}
+			fields[key] = pbVal
 		}
+		return fields, nil
 	}
 
-	// Prepare the BodyParams as google.protobuf.Struct
-	bodyParams := make(map[string]*structpb.Value)
-	if len(req.BodyParams) > 0 {
-		for key, value := range req.BodyParams {
-			switch v := value.(type) {
-			case string:
-				bodyParams[key] = structpb.NewStringValue(v)
-			case bool:
-				bodyParams[key] = structpb.NewBoolValue(v)
-			case float64:
-				bodyParams[key] = structpb.NewNumberValue(v)
-			case []interface{}:
-				// Handle arrays
-				arrValues := make([]*structpb.Value, len(v))
-				for i, item := range v {
-					arrValues[i] = structpb.NewStringValue(fmt.Sprintf("%v", item)) // Can adjust based on actual item types
-				}
-				bodyParams[key] = structpb.NewListValue(&structpb.ListValue{Values: arrValues})
-			default:
-				bodyParams[key] = structpb.NewStringValue(fmt.Sprintf("%v", v))
-			}
-		}
+	// Convert parameters (query, path, and body params)
+	queryFields, err := convertMap(req.QueryParams)
+	if err != nil {
+		return nil, fmt.Errorf("error processing query params: %w", err)
+	}
+	pathFields, err := convertMap(req.PathParams)
+	if err != nil {
+		return nil, fmt.Errorf("error processing path params: %w", err)
+	}
+	bodyFields, err := convertMap(req.BodyParams)
+	if err != nil {
+		return nil, fmt.Errorf("error processing body params: %w", err)
 	}
 
-	// Set the home directory and socket path
+	// Socket path
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user home directory: %w", err)
 	}
-	skill_root := fmt.Sprintf("%s/.yafai/plugins/skill.sock", homeDir)
-	slog.Info(skill_root)
+	skillSocket := fmt.Sprintf("%s/.yafai/plugins/skill.sock", homeDir)
+	slog.Info("Connecting to socket:", skillSocket)
 
-	// Connect to the gRPC server
-	conn, err := grpc.Dial(fmt.Sprintf("unix:%s", skill_root), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	// gRPC connection
+	conn, err := grpc.Dial(fmt.Sprintf("unix:%s", skillSocket), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		log.Fatalf("did not connect: %v", err)
+		return nil, fmt.Errorf("failed to connect to gRPC socket: %w", err)
 	}
 	defer conn.Close()
 
-	// Create a new client
 	client := skill.NewSkillServiceClient(conn)
-
-	// Set the timeout context
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Construct the ExecuteActionRequest using google.protobuf.Struct
+	// Build request
 	reqStruct := &skill.ExecuteActionRequest{
 		Name:        req.Name,
-		QueryParams: &structpb.Struct{Fields: queryParams},
-		PathParams:  &structpb.Struct{Fields: pathParams},
-		BodyParams:  &structpb.Struct{Fields: bodyParams},
+		QueryParams: &structpb.Struct{Fields: queryFields},
+		PathParams:  &structpb.Struct{Fields: pathFields},
+		BodyParams:  &structpb.Struct{Fields: bodyFields},
 	}
 
-	// Call the ExecuteAction gRPC method
+	// Execute action
 	response, err := client.ExecuteAction(ctx, reqStruct)
 	if err != nil {
-		slog.Error(err.Error())
+		slog.Error("ExecuteAction failed:", err)
 		return nil, err
 	}
 
-	return response, err
-}
-
-func (a *YafaiAgent) extractFinalAnswer(message string) string {
-	const marker = "Final Answer:"
-	idx := strings.Index(message, marker)
-	if idx == -1 {
-		return message // fallback: return full message
-	}
-	return strings.TrimSpace(message[idx+len(marker):])
-}
-
-func mapInternalRoleToLLMRole(from string) string {
-	switch from {
-	case "user":
-		return "user"
-	case "system":
-		return "system"
-	default: // agent, orchestrator, tool, etc.
-		return "assistant"
-	}
+	return response, nil
 }
 
 func extractAfter(input, key string) string {
@@ -374,14 +461,14 @@ func (a *YafaiAgent) Execute(ctx context.Context, req *YafaiRequest) (*YafaiResp
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		// Build the system prompt: only relevant instructions for the agent
 
-		sysPrompt, err := a.SetupPrompt()
-		if err != nil {
-			slog.Error("Failed to set up system prompt: %v", err)
-			return &YafaiResponse{Response: &providers.ResponseMessage{
-				Role:    "assistant",
-				Content: fmt.Sprintf("Error setting up system prompt: %v", err),
-			}}, err
-		}
+		sysPrompt := a.BuildSystemPrompt()
+		// if err != nil {
+		// 	slog.Error("Failed to set up system prompt: %v", err)
+		// 	return &YafaiResponse{Response: &providers.ResponseMessage{
+		// 		Role:    "assistant",
+		// 		Content: fmt.Sprintf("Error setting up system prompt: %v", err),
+		// 	}}, err
+		// }
 		// Include the message history in the conversation (not in system prompt)
 		conversationHistory := a.BuildConversationHistory()
 
@@ -441,6 +528,7 @@ func (a *YafaiAgent) Execute(ctx context.Context, req *YafaiRequest) (*YafaiResp
 		if len(msg.ToolCalls) > 0 {
 			call := msg.ToolCalls[0]
 			thought := fmt.Sprintf("Thought: I need to use tool: %s with input: %s", call.Function.Name, call.Function.Arguments)
+			slog.Info("Tool call: %s", thought)
 			a.AppendChatRecord("assistant", "log", thought)
 
 			action := fmt.Sprintf("Action: %s\nInput: %s", call.Function.Name, call.Function.Arguments)
@@ -511,7 +599,3 @@ func (a *YafaiAgent) BuildConversationHistory() string {
 	}
 	return historyBuilder.String()
 }
-
-// Ensure AppendChatRecord and extractFinalAnswer helper functions are defined elsewhere
-// func (a *YafaiAgent) AppendChatRecord(from, to, message string) { ... }
-// func (a *YafaiAgent) extractFinalAnswer(content string) string { ... }
