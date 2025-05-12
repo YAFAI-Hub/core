@@ -12,6 +12,7 @@ type RequestMessage struct {
 type LLMTool struct {
 	Type     string      `json:"type"`
 	Function LLMFunction `json:"function"`
+	Strict   bool        `json:"strict,omitempty"` // if true, the function must be called
 }
 
 type LLMFunction struct {
