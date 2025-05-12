@@ -99,21 +99,22 @@ func (s *WorkspaceServer) LinkStream(stream WorkspaceService_LinkStreamServer) (
 			// 2. Observe: parse orchestrator JSON
 			output := stripJsonDelimiters(resp.Response)
 			var j map[string]interface{}
+
 			if err := json.Unmarshal([]byte(output), &j); err != nil {
 				slog.Error("Error parsing orchestrator response", "connection_id", connID, "error", err)
 				stream.Send(&LinkResponse{Response: fmt.Sprintf("Internal Error: %v", err)})
 				break
 			}
 
-			// Handle chat_reply from orchestrator
 			if msg, ok := j["chat"].(string); ok {
 				s.Wsp.Orchestrator.AppendChatRecord("orchestrator", "user", msg)
 				stream.Send(&LinkResponse{Response: msg, Trace: "Source: Orchestrator"})
 				break
-			}
-
-			// Handle agent_invoke
-			if name, ok := j["name"].(string); ok {
+			} else if ans, ok := j["answer"].(string); ok {
+				s.Wsp.Orchestrator.AppendChatRecord("orchestrator", "user", ans)
+				stream.Send(&LinkResponse{Response: ans, Trace: "Source: Orchestrator"})
+				break
+			} else if name, ok := j["name"].(string); ok {
 				task, _ := j["task"].(string)
 				// Append orchestrator plan to history
 				s.Wsp.Orchestrator.AppendChatRecord("orchestrator", name, task)
@@ -149,10 +150,9 @@ func (s *WorkspaceServer) LinkStream(stream WorkspaceService_LinkStreamServer) (
 
 				case agentRes = <-resultCh:
 					// Append agent result to history
-					content := agentRes.Response.Content
+					content := fmt.Sprintf("Observation: %s (from %s)", agentRes.Response.Content, name)
 					s.Wsp.Orchestrator.AppendChatRecord(name, "user", content)
-					stream.Send(&LinkResponse{Response: content, Trace: fmt.Sprintf("Source: %s-Agent", name)})
-					currentRequest = fmt.Sprintf("Previous agent '%s' executed task '%s' with result: '%s'. What's next?", name, task, content)
+					currentRequest = content
 				}
 				// Next iteration of the ReACT loop uses updated currentRequest
 				iterationCount++
@@ -166,19 +166,12 @@ func (s *WorkspaceServer) LinkStream(stream WorkspaceService_LinkStreamServer) (
 
 				//lastResponse = currentRequest
 				continue
-			}
-
-			// Handle final_answer
-			if ans, ok := j["answer"].(string); ok {
-				s.Wsp.Orchestrator.AppendChatRecord("orchestrator", "user", ans)
-				stream.Send(&LinkResponse{Response: ans, Trace: "Source: Orchestrator"})
+			} else {
+				slog.Warn("Unexpected orchestrator response format", "response", output)
+				stream.Send(&LinkResponse{Response: "Internal Error: Unexpected response format from orchestrator."})
 				break
 			}
 
-			// Unexpected format
-			slog.Warn("Unexpected orchestrator response format", "response", output)
-			stream.Send(&LinkResponse{Response: "Internal Error: Unexpected response format from orchestrator."})
-			break
 		}
 		// Inner loop ends; wait for next packet
 	}

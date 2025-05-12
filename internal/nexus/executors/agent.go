@@ -89,6 +89,7 @@ func ConvertActionsToLLMTools(actions []*skill.Action) []providers.LLMTool {
 					Required:   requiredFields,
 				},
 			},
+			Strict: true,
 		}
 
 		// Append the tool to the list
@@ -253,6 +254,7 @@ func (a *YafaiAgent) DiscoverTools() (err error) {
 		//slog.Info("Fetching tools and actions from memory")
 		return nil
 	}
+
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("failed to get user home directory: %w", err)
@@ -282,7 +284,9 @@ func (a *YafaiAgent) DiscoverTools() (err error) {
 
 	a.Tools = tools
 	a.Actions = res.Actions
-
+	slog.Info("----------------------------------------------")
+	slog.Info("Tools discovered: ", a.Tools)
+	slog.Info("----------------------------------------------")
 	return err
 }
 
@@ -460,16 +464,16 @@ func (a *YafaiAgent) Execute(ctx context.Context, req *YafaiRequest) (*YafaiResp
 	const maxRetries = 5
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		// Build the system prompt: only relevant instructions for the agent
+		sysPrompt, err := a.SetupPrompt()
+		if err != nil {
+			slog.Error("Failed to set up system prompt: %v", err)
+			return &YafaiResponse{Response: &providers.ResponseMessage{
+				Role:    "assistant",
+				Content: fmt.Sprintf("Error setting up system prompt: %v", err),
+			}}, err
+		}
 
-		sysPrompt := a.BuildSystemPrompt()
-		// if err != nil {
-		// 	slog.Error("Failed to set up system prompt: %v", err)
-		// 	return &YafaiResponse{Response: &providers.ResponseMessage{
-		// 		Role:    "assistant",
-		// 		Content: fmt.Sprintf("Error setting up system prompt: %v", err),
-		// 	}}, err
-		// }
-		// Include the message history in the conversation (not in system prompt)
+		// Include the message history in the conversation (not in the system prompt)
 		conversationHistory := a.BuildConversationHistory()
 
 		providerReq := []providers.RequestMessage{
@@ -500,12 +504,13 @@ func (a *YafaiAgent) Execute(ctx context.Context, req *YafaiRequest) (*YafaiResp
 			break
 		}
 
+		// Extract message content
 		msg := resp.Choices[0].Message
 		content := strings.TrimSpace(msg.Content)
 		a.AppendChatRecord("agent", "user", content)
 
 		// Handle clarification and final answer cases
-		if strings.HasPrefix(content, "Query:") {
+		if strings.Contains(content, "Query:") {
 			query := strings.TrimSpace(extractAfter(content, "Query:"))
 			return &YafaiResponse{Response: &providers.ResponseMessage{
 				Role:    "assistant",
@@ -513,7 +518,7 @@ func (a *YafaiAgent) Execute(ctx context.Context, req *YafaiRequest) (*YafaiResp
 			}}, nil
 		}
 
-		if strings.HasPrefix(content, "Final Answer:") {
+		if strings.Contains(content, "Final Answer:") {
 			answer := strings.TrimSpace(extractAfter(content, "Final Answer:"))
 			return &YafaiResponse{Response: &providers.ResponseMessage{
 				Role:    "assistant",
@@ -521,8 +526,8 @@ func (a *YafaiAgent) Execute(ctx context.Context, req *YafaiRequest) (*YafaiResp
 			}}, nil
 		}
 
-		// slog.Info("Tools added : %+v", a.Tools)
-		slog.Info("LLM Response : %+v", msg)
+		// Log the response
+		slog.Info("LLM Response: %+v", msg)
 
 		// Handle tool invocation
 		if len(msg.ToolCalls) > 0 {
