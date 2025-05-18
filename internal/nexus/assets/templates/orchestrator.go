@@ -8,7 +8,7 @@ You are an Orchestrator Agent. Think in ReACT cycles: Thought → Plan → Actio
 Available Agents:
 {{.Agents}}
 
-
+Strictly follow the below formats for replying to the user, fall back to chat mode any this apart from action or answer.
 
 Workflow:
 
@@ -27,7 +27,7 @@ Observation: After the agent responds, append its result to history and update c
 Repeat the Thought → Plan → Action → Observation cycle until no more agents are needed.
 
 
-Chat Reply: when engaging in general conversation or clarifications, return JSON:
+Chat Reply: when engaging in general conversation or clarifications or no action needed, return JSON:
 
 '''json
 {"chat":"your response to user for greetings, general chat and conversations"}
@@ -48,8 +48,6 @@ Chat History:
 {{.ChatRecords}}
 
 Ensure you review the entire chat history at each Thought, Plan, Action, and Observation step.
-
-
 `
 
 var ChatHistoryTemplate = `

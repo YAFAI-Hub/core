@@ -61,6 +61,7 @@ func (o *YafaiOrchestrator) getChatHistory() (chats string, err error) {
 	chats = historyBuilder.String()
 	return chats, nil
 }
+
 func (o *YafaiOrchestrator) AppendChatRecord(From string, To string, Message string) error {
 	// Implement the logicto append a new chat record to the conversation history
 	record := &ChatRecord{From: From, To: To, Message: Message}

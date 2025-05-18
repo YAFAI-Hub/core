@@ -17,26 +17,18 @@ import (
 )
 
 func stripJsonDelimiters(rawString string) string {
-	startDelimiter := "```json"
-	endDelimiter := "```"
-
 	// 1. Trim leading/trailing whitespace from the input string
 	trimmed := strings.TrimSpace(rawString)
 
-	// 2. Check if the trimmed string has the specified prefix and suffix
-	hasPrefix := strings.HasPrefix(trimmed, startDelimiter)
-	hasSuffix := strings.HasSuffix(trimmed, endDelimiter)
+	// Remove curly braces and quotes
+	re := regexp.MustCompile(`^{"([^"]*)":"([^"]*)"}$`)
+	match := re.FindStringSubmatch(trimmed)
 
-	// 3. Ensure the string is long enough to contain more than just the delimiters
-	if hasPrefix && hasSuffix && len(trimmed) > len(startDelimiter)+len(endDelimiter) {
-		// Extract the content between the delimiters
-		content := trimmed[len(startDelimiter) : len(trimmed)-len(endDelimiter)]
-
-		// Trim whitespace from the extracted content itself
-		return strings.TrimSpace(content)
+	if len(match) > 2 {
+		return match[2]
 	}
 
-	// 4. If delimiters weren't found correctly, return the trimmed original string
+	// If delimiters weren't found correctly, return the trimmed original string
 	return trimmed
 }
 
@@ -95,9 +87,10 @@ func (s *WorkspaceServer) LinkStream(stream WorkspaceService_LinkStreamServer) (
 				stream.Send(&LinkResponse{Response: fmt.Sprintf("Orchestrator Error: %v", err)})
 				break
 			}
-
+			slog.Info("LLM Response: %v", resp.Response)
 			// 2. Observe: parse orchestrator JSON
 			output := stripJsonDelimiters(resp.Response)
+
 			var j map[string]interface{}
 
 			if err := json.Unmarshal([]byte(output), &j); err != nil {

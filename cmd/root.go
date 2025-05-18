@@ -10,6 +10,10 @@ import (
 	"log"
 	"log/slog"
 	"net"
+	"net/http"
+	"time"
+
+	//"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -23,6 +27,7 @@ import (
 	"github.com/rivo/tview"
 
 	link "yafai/internal/bridge/link"
+	"yafai/internal/bridge/relay"
 	wsp "yafai/internal/bridge/wsp"
 
 	config "yafai/internal/nexus/configs"
@@ -141,9 +146,10 @@ func setupYafai(env string) (err error) {
 	return err
 }
 
-func StartLink(ctx context.Context) (err error) {
+func StartLink(ctx context.Context, cancel context.CancelFunc) (err error) {
 
 	lis, err := net.Listen("tcp", ":7001")
+
 	if err != nil {
 		slog.Error("failed to listen", "error", err)
 		return err
@@ -151,13 +157,83 @@ func StartLink(ctx context.Context) (err error) {
 
 	l := grpc.NewServer()
 
-	linkServer, err := link.NewLinkServer("localhost:7002")
+	linkServer, err := link.NewGrpcLink("localhost:7002")
 	if err != nil {
-		slog.Error("Link server creation failed.")
+		slog.Error("Link server creation failed", "error", err)
+		return fmt.Errorf("failed to create link server: %w", err)
 	}
 
 	link.RegisterChatServiceServer(l, linkServer)
 	reflection.Register(l)
+
+	cfg := relay.Config{
+		MongoURI:        os.Getenv("MONGO_URI"),
+		DatabaseName:    os.Getenv("MONGO_DB_NAME"),
+		WorkspaceAddr:   os.Getenv("WORKSPACE_ADDR"),
+		RelayServerAddr: os.Getenv("RELAY_ADDR"),
+	}
+
+	// Fallback to default values if environment variables are not set
+	if cfg.MongoURI == "" {
+		cfg.MongoURI = "mongodb://localhost:27017"
+	}
+	if cfg.DatabaseName == "" {
+		cfg.DatabaseName = "yafai"
+	}
+	if cfg.WorkspaceAddr == "" {
+		cfg.WorkspaceAddr = "localhost:7002"
+	}
+	if cfg.RelayServerAddr == "" {
+		cfg.RelayServerAddr = "localhost:7003"
+	}
+
+	// Setup relay router
+	router, err := relay.SetupRelay(cfg)
+	if err != nil {
+		log.Fatalf("Failed to setup relay: %v", err)
+	}
+
+	// Configure server
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "7003" // Default port
+	}
+	addr := fmt.Sprintf(":%s", port)
+
+	// Create HTTP server
+	server := &http.Server{
+		Addr:         addr,
+		Handler:      router,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
+
+	// Start server in a goroutine
+	go func() {
+		log.Printf("Starting server on %s", addr)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server failed: %v", err)
+		}
+	}()
+
+	// Graceful shutdown
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	log.Println("Shutting down server...")
+
+	// Create a context with timeout for graceful shutdown
+	ctxWithTimeout, cancelTimeout := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelTimeout()
+
+	// Shutdown the server
+	if err := server.Shutdown(ctxWithTimeout); err != nil {
+		log.Fatalf("Server shutdown failed: %v", err)
+	}
+
+	log.Println("Server gracefully stopped")
 
 	// Handle graceful shutdown
 	go func() {
@@ -167,7 +243,7 @@ func StartLink(ctx context.Context) (err error) {
 		slog.Info("Yafai Link graceful shudown complete.")
 	}()
 
-	slog.Info("YAFAI link listening on port :7001")
+	// Start the WebSocket server in a separate goroutine
 	if err := l.Serve(lis); err != nil {
 		slog.Error("failed to start link", "error", err)
 		return err
@@ -430,7 +506,7 @@ func StartYafai(env string, mode string, configsPath string) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		err := StartLink(ctx)
+		err := StartLink(ctx, cancel)
 		if err != nil {
 			slog.Error("Error starting YAFAI link: %v", err.Error(), nil)
 			cancel()

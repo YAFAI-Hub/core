@@ -10,7 +10,8 @@ service ChatService{
 }
 
 message ChatRequest{
-    string request = 1;
+    string thread = 1;
+    string request = 2;
 }
 
 message ChatResponse{

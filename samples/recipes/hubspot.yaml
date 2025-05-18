@@ -16,6 +16,9 @@ orchestrator:
       provider: "groq"
       goal: "Optimize sales process and deal tracking by providing real-time insights, automating repetitive tasks, and ensuring no deals are left behind."
       status: "Initialized"
+      skills:
+       - hubspot
+       - asana
 
     contacts_agent:
       capabilities: "create contacts, update contact information, fetch contact details, delete duplicate contacts"
@@ -25,3 +28,6 @@ orchestrator:
       provider: "groq"
       goal: "Ensure accurate and up-to-date contact management, improve relationship history tracking, and enhance communication across teams by eliminating data redundancies."
       status: "Initialized"
+      skills:
+        - hubspot
+        - asana
