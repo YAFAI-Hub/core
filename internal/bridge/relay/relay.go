@@ -194,7 +194,12 @@ func SetupRelay(cfg Config) (*gin.Engine, error) {
 	router.Use(gin.Recovery())
 
 	// Simple CORS middleware
-	router.Use(cors.Default())
+	router.Use(cors.New(cors.Config{
+		AllowAllOrigins:  true,
+		AllowMethods:     []string{"*"},
+		AllowHeaders:     []string{"*"},
+		AllowCredentials: true,
+	}))
 
 	// Add this to help with debugging JSON parsing
 	router.Use(func(c *gin.Context) {
