@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"github.com/gorilla/websocket"
@@ -191,6 +192,9 @@ func SetupRelay(cfg Config) (*gin.Engine, error) {
 	router := gin.New()
 	router.Use(gin.Logger())
 	router.Use(gin.Recovery())
+
+	// Simple CORS middleware
+	router.Use(cors.Default())
 
 	// Add this to help with debugging JSON parsing
 	router.Use(func(c *gin.Context) {
