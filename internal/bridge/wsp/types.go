@@ -2,11 +2,12 @@ package wsp
 
 import (
 	"context"
-	"yafai/internal/nexus/workspace"
+	db "yafai/internal/bridge/db"
 )
 
 type WorkspaceServer struct {
 	UnimplementedWorkspaceServiceServer
-	Wsp *workspace.Workspace
+	Db *db.DBWrapper
 	Ctx context.Context
+
 }

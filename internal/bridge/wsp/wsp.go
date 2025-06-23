@@ -8,12 +8,14 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
+	db "yafai/internal/bridge/db"
 	"yafai/internal/nexus/executors"
 	"yafai/internal/nexus/providers"
+	"yafai/internal/nexus/workspace"
 )
 
 func stripJsonDelimiters(rawString string) string {
@@ -38,6 +40,43 @@ func stripJsonDelimiters(rawString string) string {
 
 	// 4. If delimiters weren't found correctly, return the trimmed original string
 	return trimmed
+}
+
+func getCurrentWorkspace(wsp *db.Workspace) (wspCore *workspace.Workspace) {
+	CoreTeam := make(map[string]*executors.YafaiAgent)
+	slog.Info("+%v", wsp)
+	for _, agent := range wsp.Orchestrator.Team {
+		provider := providers.GetProvider(agent.Provider)
+		c_agent := &executors.YafaiAgent{
+			Name:          agent.Name,
+			Description:   agent.Description,
+			Capabilities:  agent.Capabilities,
+			Model:         agent.Model,
+			Provider:      agent.Provider,
+			GenAIProvider: provider,
+			Goal:          agent.Goal,
+		}
+		CoreTeam[agent.Name] = c_agent
+	}
+
+	orch_provider := providers.GetProvider(wsp.Orchestrator.Provider)
+	CoreOrchestrator := &executors.YafaiOrchestrator{
+		Name:          wsp.Orchestrator.Name,
+		Description:   wsp.Orchestrator.Description,
+		Scope:         wsp.Orchestrator.Scope,
+		Model:         wsp.Orchestrator.Model,
+		Goal:          wsp.Orchestrator.Goal,
+		Provider:      wsp.Orchestrator.Provider,
+		GenAIProvider: orch_provider,
+		Team:          CoreTeam,
+	}
+
+	CoreWsp := &workspace.Workspace{
+		Name:         wsp.Name,
+		Orchestrator: CoreOrchestrator,
+	}
+
+	return CoreWsp
 }
 
 func (s *WorkspaceServer) LinkStream(stream WorkspaceService_LinkStreamServer) (err error) { // Assume YourServiceServer and YourService_LinkServer types
@@ -72,9 +111,24 @@ func (s *WorkspaceServer) LinkStream(stream WorkspaceService_LinkStreamServer) (
 			return err
 		}
 
+		// Convert WspId and ThreadId from string to int64
+		wspID, err := strconv.ParseInt(packet.WspId, 10, 64)
+		if err != nil {
+			slog.Error("Invalid WspId", "value", packet.WspId, "error", err)
+			return err
+		}
+		threadID, err := strconv.ParseInt(packet.ThreadId, 10, 64)
+		if err != nil {
+			slog.Error("Invalid ThreadId", "value", packet.ThreadId, "error", err)
+			return err
+		}
+
+		wsp_db, err := s.Db.GetWorkspaceByID(ctx, wspID)
+		if err != nil {
+			slog.Error("Error in getting the current workspace", err.Error())
+		}
+		CoreWsp := getCurrentWorkspace(wsp_db)
 		// Append user message to orchestrator history
-		s.Wsp.Orchestrator.AppendChatRecord("user", "orchestrator", packet.Request)
-		currentRequest := packet.Request
 
 		// ReACT loop for this packet
 		iterationCount := 0
@@ -89,7 +143,14 @@ func (s *WorkspaceServer) LinkStream(stream WorkspaceService_LinkStreamServer) (
 			}
 
 			// 1. Plan/Invoke: ask orchestrator what to do
-			resp, err := s.InvokeOrchestrator(ctx, &OrchestratorRequest{Request: currentRequest})
+			resp, err := InvokeOrchestrator(ctx, CoreWsp, s.Db, threadID, &OrchestratorRequest{Request: packet.Request})
+
+			if err != nil {
+				slog.Error(err.Error())
+			}
+
+			slog.Info("Orchestrator Response:", resp)
+
 			if err != nil {
 				slog.Error("Error invoking orchestrator", "connection_id", connID, "error", err)
 				stream.Send(&LinkResponse{Response: fmt.Sprintf("Orchestrator Error: %v", err)})
@@ -97,38 +158,39 @@ func (s *WorkspaceServer) LinkStream(stream WorkspaceService_LinkStreamServer) (
 			}
 
 			// 2. Observe: parse orchestrator JSON
-			output := stripJsonDelimiters(resp.Response)
-			var j map[string]interface{}
+			//output := stripJsonDelimiters(resp.)
+			//var j map[string]interface{}
 
-			if err := json.Unmarshal([]byte(output), &j); err != nil {
+			if err != nil {
 				slog.Error("Error parsing orchestrator response", "connection_id", connID, "error", err)
 				stream.Send(&LinkResponse{Response: fmt.Sprintf("Internal Error: %v", err)})
 				break
 			}
 
-			if msg, ok := j["chat"].(string); ok {
-				s.Wsp.Orchestrator.AppendChatRecord("orchestrator", "user", msg)
-				stream.Send(&LinkResponse{Response: msg, Trace: "Source: Orchestrator"})
+			if resp.Chat != "" {
+				message := db.Message{From: "orchestrator", To: "user", Content: resp.Chat}
+				CoreWsp.Orchestrator.AppendChatRecord(s.Db, threadID, message)
+				stream.Send(&LinkResponse{Response: resp.Chat, Trace: "Source: Orchestrator"})
 				break
-			} else if ans, ok := j["answer"].(string); ok {
-				s.Wsp.Orchestrator.AppendChatRecord("orchestrator", "user", ans)
-				stream.Send(&LinkResponse{Response: ans, Trace: "Source: Orchestrator"})
+			} else if resp.Answer != "" {
+				//CoreWsp.Orchestrator.AppendChatRecord("orchestrator", "user", resp.Answer)
+				stream.Send(&LinkResponse{Response: resp.Answer, Trace: "Source: Orchestrator"})
 				break
-			} else if name, ok := j["name"].(string); ok {
-				task, _ := j["task"].(string)
+			} else if resp.Step != nil {
 				// Append orchestrator plan to history
-				s.Wsp.Orchestrator.AppendChatRecord("orchestrator", name, task)
+				message := db.Message{From: "orchestrator", To: "user", Content: resp.Chat}
+				CoreWsp.Orchestrator.AppendChatRecord(s.Db, threadID, message)
 
 				// Prepare agent request
-				agentReq := &executors.YafaiRequest{Request: &providers.RequestMessage{Role: "user", Content: task}}
+				agentReq := &executors.YafaiRequest{Request: &providers.RequestMessage{Role: "user", Content: resp.Step.Task}}
 
 				// Run agent execution in goroutine and wait
 				resultCh := make(chan *executors.YafaiResponse, 1)
 				errCh := make(chan error, 1)
 				go func() {
-					agentExec, exists := s.Wsp.Orchestrator.Team[name]
+					agentExec, exists := CoreWsp.Orchestrator.Team[resp.Step.Name]
 					if !exists {
-						errCh <- fmt.Errorf("agent '%s' not found", name)
+						errCh <- fmt.Errorf("agent '%s' not found", resp.Step.Name)
 						return
 					}
 					res, err := agentExec.Execute(ctx, agentReq)
@@ -138,21 +200,22 @@ func (s *WorkspaceServer) LinkStream(stream WorkspaceService_LinkStreamServer) (
 						resultCh <- res
 					}
 				}()
-
+				//var currentRequest string;
 				var agentRes *executors.YafaiResponse
 				select {
+
 				case err := <-errCh:
-					slog.Error("Agent execution failed", "agent", name, "error", err)
-					s.Wsp.Orchestrator.AppendChatRecord(name, "error", err.Error())
-					stream.Send(&LinkResponse{Response: fmt.Sprintf("Agent '%s' error: %v", name, err)})
-					currentRequest = fmt.Sprintf("Previous agent '%s' failed with error: %s. What's next?", name, err)
+					slog.Error("Agent execution failed", "agent", resp.Step.Name, "error", err)
+					message := db.Message{From: resp.Step.Name, To: "user", Content: err.Error()}
+					CoreWsp.Orchestrator.AppendChatRecord(s.Db, threadID, message)
+					stream.Send(&LinkResponse{Response: fmt.Sprintf("Agent '%s' error: %v", resp.Step.Name, err)})
 					continue
 
 				case agentRes = <-resultCh:
 					// Append agent result to history
-					content := fmt.Sprintf("Observation: %s (from %s)", agentRes.Response.Content, name)
-					s.Wsp.Orchestrator.AppendChatRecord(name, "user", content)
-					currentRequest = content
+					content := fmt.Sprintf("Observation: %s (from %s)", agentRes.Response.Content, resp.Step.Name)
+					message := db.Message{From: resp.Step.Name, To: "user", Content: content}
+					CoreWsp.Orchestrator.AppendChatRecord(s.Db, threadID, message)
 				}
 				// Next iteration of the ReACT loop uses updated currentRequest
 				iterationCount++
@@ -167,7 +230,7 @@ func (s *WorkspaceServer) LinkStream(stream WorkspaceService_LinkStreamServer) (
 				//lastResponse = currentRequest
 				continue
 			} else {
-				slog.Warn("Unexpected orchestrator response format", "response", output)
+				slog.Warn("Unexpected orchestrator response format", "response", resp)
 				stream.Send(&LinkResponse{Response: "Internal Error: Unexpected response format from orchestrator."})
 				break
 			}
@@ -179,124 +242,22 @@ func (s *WorkspaceServer) LinkStream(stream WorkspaceService_LinkStreamServer) (
 	// End of outer receive packet loop
 }
 
-func (s *WorkspaceServer) InvokeOrchestrator(ctx context.Context, req *OrchestratorRequest) (resp *OrchestratorResponse, err error) {
-	slog.Info("Orchestrator Request:", req.Request)
-	orch_resp, err := s.Wsp.Orchestrator.Execute(ctx, &executors.YafaiRequest{Request: &providers.RequestMessage{Role: "user", Content: req.Request}})
+func InvokeOrchestrator(ctx context.Context, CoreWsp *workspace.Workspace, db_conn *db.DBWrapper, thread int64, req *OrchestratorRequest) (resp *executors.YafaiOrchestratorResponse, err error) {
 
-	// re := regexp.MustCompile(`<think>(.*?)</think>`)
-	// output := re.ReplaceAllString(planner_resp.Response.Content, "")
-
-	// // Remove any leading/trailing whitespace
-	// output = strings.TrimSpace(output)
-
-	// // Find the beginning of the json array
-	// start := strings.Index(output, "[")
-
-	// if start == -1 {
-	// 	slog.Info("No JSON array found.")
-	// 	return
-	// }
-
-	// //Extract the JSON array string
-	// planner_resp.Response.Content = output[start:]
+	orch_resp, err := CoreWsp.Orchestrator.Execute(ctx, db_conn, thread, &executors.YafaiRequest{Request: &providers.RequestMessage{Role: "user", Content: req.Request}})
 	if err != nil {
-		slog.Error(err.Error())
+		slog.Error("Orchestrator Invokation Error: %s", err.Error(), "error")
+	}
+	slog.Info("Orchestrator Response:%s", orch_resp.Response.Content, "orchestrator")
+
+	var response executors.YafaiOrchestratorResponse
+
+	if err := json.Unmarshal([]byte(orch_resp.Response.Content), &response); err != nil {
+		slog.Error("Error decoding orchestrator response", "error", err)
+		return nil, fmt.Errorf("failed to decode orchestrator response: %w", err)
 	}
 
-	// steps, err := s.Planner.Parse(planner_resp)
+	slog.Info("Received orchestrator response", "response", response)
 
-	// if err != nil {
-	// 	slog.Error(err.Error())
-	// }
-
-	// var response []*PlannerStep
-
-	// for _, step := range steps {
-	// 	response = append(response, &PlannerStep{Task: step.Task, Agent: step.Agent, Thought: step.Thought})
-	// }
-	s.Wsp.Orchestrator.AppendChatRecord("orchestrator", "user", orch_resp.Response.Content)
-	slog.Info("Received orchestrator response",
-		"connection_id", "connID",
-		"response", orch_resp.Response.Content)
-	return &OrchestratorResponse{Response: orch_resp.Response.Content}, nil
-}
-
-func (s *WorkspaceServer) InvokePlanner(ctx context.Context, req *PlannerRequest) (res *PlannerResponse, err error) {
-
-	planner_resp, err := s.Wsp.Planner.Execute(ctx, &executors.YafaiRequest{Request: &providers.RequestMessage{Role: "user", Content: req.Request}})
-
-	re := regexp.MustCompile(`<think>(.*?)</think>`)
-	output := re.ReplaceAllString(planner_resp.Response.Content, "")
-
-	// Remove any leading/trailing whitespace
-	output = strings.TrimSpace(output)
-
-	// Find the beginning of the json array
-	start := strings.Index(output, "[")
-
-	if start == -1 {
-		slog.Info("No JSON array found.")
-		return
-	}
-
-	//Extract the JSON array string
-	planner_resp.Response.Content = output[start:]
-	if err != nil {
-		slog.Error(err.Error())
-	}
-
-	steps, err := s.Wsp.Planner.Parse(planner_resp)
-	s.Wsp.Orchestrator.UpdatePlan(&executors.PlannerResponse{Response: steps})
-	if err != nil {
-		slog.Error(err.Error())
-	}
-
-	var response []*PlannerStep
-
-	for _, step := range steps {
-		response = append(response, &PlannerStep{Task: step.Task, Agent: step.Agent, Thought: step.Thought})
-	}
-
-	return &PlannerResponse{Steps: response}, err
-
-}
-
-func (s *WorkspaceServer) InvokePlanRefine(ctx context.Context, req *PlannerRefineRequest) (res *PlannerResponse, err error) {
-
-	refinement_payload := fmt.Sprintf("Refine the following plan,\n %s \n based on the refinement request: %s. Stick to the formatting isntructions", req.Plan, req.Refinement)
-	planner_resp, err := s.Wsp.Planner.Execute(ctx, &executors.YafaiRequest{Request: &providers.RequestMessage{Role: "user", Content: refinement_payload}})
-
-	re := regexp.MustCompile(`<think>(.*?)</think>`)
-	output := re.ReplaceAllString(planner_resp.Response.Content, "")
-
-	// Remove any leading/trailing whitespace
-	output = strings.TrimSpace(output)
-
-	// Find the beginning of the json array
-	start := strings.Index(output, "[")
-
-	if start == -1 {
-		slog.Info("No JSON array found.")
-		return
-	}
-
-	//Extract the JSON array string
-	planner_resp.Response.Content = output[start:]
-	if err != nil {
-		slog.Error(err.Error())
-	}
-
-	steps, err := s.Wsp.Planner.Parse(planner_resp)
-	s.Wsp.Orchestrator.UpdatePlan(&executors.PlannerResponse{Response: steps})
-	if err != nil {
-		slog.Error(err.Error())
-	}
-
-	var response []*PlannerStep
-
-	for _, step := range steps {
-		response = append(response, &PlannerStep{Task: step.Task, Agent: step.Agent, Thought: step.Thought})
-	}
-
-	return &PlannerResponse{Steps: response}, err
+	return &response, nil
 }

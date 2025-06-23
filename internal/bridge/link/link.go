@@ -121,7 +121,9 @@ func (l *LinkServer) ChatStream(stream ChatService_ChatStreamServer) (err error)
 			}
 
 			if err := wspStream.Send(&wsp.LinkRequest{
-				Request: packet.Request,
+				Request:  packet.Request,
+				WspId:    packet.WspId,
+				ThreadId: packet.ThreadId,
 			}); err != nil {
 				return fmt.Errorf("workspace send error: %w", err)
 			}
