@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"log/slog"
 	"os"
 	"strings"
@@ -248,22 +247,32 @@ func (a *YafaiAgent) ConvertToolCallToExecutionInput(toolCall providers.ToolCall
 	}, nil
 }
 
-func (a *YafaiAgent) DiscoverTools() (err error) {
+func (a *YafaiAgent) DiscoverTools() (response *YafaiResponse, err error) {
 
 	if a.SkillClient != nil && a.Tools != nil {
 		//slog.Info("Fetching tools and actions from memory")
-		return nil
+		return &YafaiResponse{Response: &providers.ResponseMessage{
+			Role:    "assistant",
+			Content: fmt.Sprintf("Fetched tools from agent state: %v", err),
+		}}, nil
 	}
 
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("failed to get user home directory: %w", err)
+		return &YafaiResponse{Response: &providers.ResponseMessage{
+			Role:    "assistant",
+			Content: fmt.Sprintf("Setting home dir failed: %v", err),
+		}}, nil
 	}
 	skill_root := fmt.Sprintf("%s/.yafai/plugins/skill.sock", homeDir)
 	slog.Info(skill_root)
-	conn, err := grpc.Dial(fmt.Sprintf("unix:%s", skill_root), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient("localhost:5001", grpc.WithInsecure())
 	if err != nil {
-		log.Fatalf("did not connect: %v", err)
+		slog.Error("Model error: %v", err)
+		return &YafaiResponse{Response: &providers.ResponseMessage{
+			Role:    "assistant",
+			Content: fmt.Sprintf("Error with the model: %v", err),
+		}}, nil
 	}
 	defer conn.Close()
 
@@ -277,7 +286,8 @@ func (a *YafaiAgent) DiscoverTools() (err error) {
 	defer cancel()
 	res, err := client.GetActions(ctx, req)
 	if err != nil {
-		log.Fatalf("could not greet: %v", err)
+		slog.Error("Skill server unavailable", "error", err)
+		return nil, fmt.Errorf("skill server not available: %w", err)
 	}
 
 	tools := ConvertActionsToLLMTools(res.Actions)
@@ -287,7 +297,10 @@ func (a *YafaiAgent) DiscoverTools() (err error) {
 	slog.Info("----------------------------------------------")
 	slog.Info("Tools discovered: ", a.Tools)
 	slog.Info("----------------------------------------------")
-	return err
+	return &YafaiResponse{Response: &providers.ResponseMessage{
+		Role:    "assistant",
+		Content: fmt.Sprintf("Fetched tools from skill server updated agent state : %v", err),
+	}}, nil
 }
 
 func toStructPB(value interface{}) (*structpb.Value, error) {
@@ -397,10 +410,11 @@ func (a *YafaiAgent) ExecuteTool(req ToolExecutionInput) (*skill.ExecuteActionRe
 		return nil, fmt.Errorf("failed to get user home directory: %w", err)
 	}
 	skillSocket := fmt.Sprintf("%s/.yafai/plugins/skill.sock", homeDir)
-	slog.Info("Connecting to socket:", skillSocket)
+	slog.Info("Connecting to socket:", "skill", skillSocket)
 
 	// gRPC connection
-	conn, err := grpc.Dial(fmt.Sprintf("unix:%s", skillSocket), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient("localhost:5001", grpc.WithTransportCredentials(insecure.NewCredentials()))
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to gRPC socket: %w", err)
 	}
@@ -428,7 +442,7 @@ func (a *YafaiAgent) ExecuteTool(req ToolExecutionInput) (*skill.ExecuteActionRe
 	return response, nil
 }
 
-func extractAfter(input, key string) string {
+func extractAfter(input string, key string) string {
 	idx := strings.Index(input, key)
 	if idx == -1 {
 		return ""
@@ -438,7 +452,8 @@ func extractAfter(input, key string) string {
 
 func (a *YafaiAgent) Execute(ctx context.Context, req *YafaiRequest) (*YafaiResponse, error) {
 	// Discover tools
-	if err := a.DiscoverTools(); err != nil {
+	_, err := a.DiscoverTools()
+	if err != nil {
 		slog.Error("Tool discovery failed: %v", err)
 		return &YafaiResponse{Response: &providers.ResponseMessage{
 			Role:    "assistant",

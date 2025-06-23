@@ -10,11 +10,14 @@ service ChatService{
 }
 
 message ChatRequest{
-    string request = 1;
+    string wspId=1;
+    string threadId =2;
+    string request = 3;
 }
 
 message ChatResponse{
-    string response = 1;
-    string trace = 2;
-    
+    string threadId = 1;
+    string wspID = 2;
+    string response = 3;
+    string trace = 4;
 }

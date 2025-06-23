@@ -101,7 +101,17 @@ type PlannerTemplateStruct struct {
 	Agents string
 }
 
-//Agent Types
+// Agent Types
+type YafaiOrchestratorResponse struct {
+	Chat   string                        `json:"chat,omitempty"`
+	Step   *YafaiOrchestratorAgentInvoke `json:"step,omitempty"`
+	Answer string                        `json:"answer,omitempty"`
+}
+
+type YafaiOrchestratorAgentInvoke struct {
+	Name string `json:"agent"`
+	Task string `json:"task"`
+}
 
 //Orchestrator Types
 
@@ -116,7 +126,7 @@ type ToolDescription struct {
 	Description string
 }
 
-var AgentReactStep struct {
+type AgentReactStep struct {
 	Thought     string               `json:"thought"`
 	Action      string               `json:"action"`
 	Input       interface{}          `json:"input"`

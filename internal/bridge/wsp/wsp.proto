@@ -20,12 +20,16 @@ service WorkspaceService {
 
 
 message LinkRequest{
-    string request = 1;
+    string wspId =1;
+    string threadId =2;
+    string request = 3;
 }
 
 message LinkResponse{
-    string response = 1;
-    string trace = 2;
+    string thread_id = 1;
+    string wspID = 2;
+    string response = 3;
+    string trace = 4;
 }
 
 
@@ -94,4 +98,3 @@ message HeartBeatRequest{
 message HeartBeatResponse{
     string response = 1;
 }
-
