@@ -39,7 +39,7 @@ When markdown is necessary, only when necessary, avoid numbering the headings. E
 
 The Markdown should demonstrate proper use of:
 
-- Headings: All levels from # (H1) to ###### (H6)
+- Headings: All levels from # (H1) to ### (H3), heading only when absolutely necessary.
 - Text styles: **bold**, *italic*, ~~strikethrough~~
 - Lists:
   - Unordered using -, * or +

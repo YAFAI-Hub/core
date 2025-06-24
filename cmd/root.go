@@ -49,6 +49,7 @@ var ansiRegexp = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 func renderMarkdown(md string) string {
 	result := markdown.Render(md, 80, 6)
+
 	plain := ansiRegexp.ReplaceAllString(string(result), "")
 	return plain
 }
@@ -236,7 +237,7 @@ func renderThreadMessages(chatView *tview.TextView, dbw *db.DBWrapper, ctx conte
 	for _, msg := range messages {
 		slog.Info("Rendering message-----------------------------------", "From", msg.From, "Content", msg.Content)
 		slog.Info(msg.Content)
-		chatView.Write([]byte(fmt.Sprintf("[yellow]%s: [white]%s\n", msg.From, msg.Content)))
+		chatView.Write([]byte(fmt.Sprintf("[yellow]%s: [white]%s\n", msg.From, renderMarkdown(msg.Content))))
 		chatView.Write([]byte("[white]----------------------------------------\n"))
 	}
 }

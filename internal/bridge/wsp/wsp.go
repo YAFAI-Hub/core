@@ -128,6 +128,7 @@ func (s *WorkspaceServer) LinkStream(stream WorkspaceService_LinkStreamServer) (
 			slog.Error("Error in getting the current workspace", err.Error())
 		}
 		CoreWsp := getCurrentWorkspace(wsp_db)
+		currentRequest := packet.Request
 		// Append user message to orchestrator history
 
 		// ReACT loop for this packet
@@ -143,23 +144,7 @@ func (s *WorkspaceServer) LinkStream(stream WorkspaceService_LinkStreamServer) (
 			}
 
 			// 1. Plan/Invoke: ask orchestrator what to do
-			resp, err := InvokeOrchestrator(ctx, CoreWsp, s.Db, threadID, &OrchestratorRequest{Request: packet.Request})
-
-			if err != nil {
-				slog.Error(err.Error())
-			}
-
-			slog.Info("Orchestrator Response:", resp)
-
-			if err != nil {
-				slog.Error("Error invoking orchestrator", "connection_id", connID, "error", err)
-				stream.Send(&LinkResponse{Response: fmt.Sprintf("Orchestrator Error: %v", err)})
-				break
-			}
-
-			// 2. Observe: parse orchestrator JSON
-			//output := stripJsonDelimiters(resp.)
-			//var j map[string]interface{}
+			resp, err := InvokeOrchestrator(ctx, CoreWsp, s.Db, threadID, &OrchestratorRequest{Request: currentRequest})
 
 			if err != nil {
 				slog.Error("Error parsing orchestrator response", "connection_id", connID, "error", err)
@@ -178,7 +163,7 @@ func (s *WorkspaceServer) LinkStream(stream WorkspaceService_LinkStreamServer) (
 				break
 			} else if resp.Step != nil {
 				// Append orchestrator plan to history
-				message := db.Message{From: "orchestrator", To: "user", Content: resp.Chat}
+				message := db.Message{From: "orchestrator", To: "user", Content: resp.Step.Task}
 				CoreWsp.Orchestrator.AppendChatRecord(s.Db, threadID, message)
 
 				// Prepare agent request
@@ -209,6 +194,7 @@ func (s *WorkspaceServer) LinkStream(stream WorkspaceService_LinkStreamServer) (
 					message := db.Message{From: resp.Step.Name, To: "user", Content: err.Error()}
 					CoreWsp.Orchestrator.AppendChatRecord(s.Db, threadID, message)
 					stream.Send(&LinkResponse{Response: fmt.Sprintf("Agent '%s' error: %v", resp.Step.Name, err)})
+					currentRequest = fmt.Sprintf("Previous agent '%s' failed with error: %s. What's next?", resp.Step.Name, err)
 					continue
 
 				case agentRes = <-resultCh:
@@ -216,6 +202,7 @@ func (s *WorkspaceServer) LinkStream(stream WorkspaceService_LinkStreamServer) (
 					content := fmt.Sprintf("Observation: %s (from %s)", agentRes.Response.Content, resp.Step.Name)
 					message := db.Message{From: resp.Step.Name, To: "user", Content: content}
 					CoreWsp.Orchestrator.AppendChatRecord(s.Db, threadID, message)
+					currentRequest = content
 				}
 				// Next iteration of the ReACT loop uses updated currentRequest
 				iterationCount++
