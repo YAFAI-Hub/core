@@ -20,7 +20,7 @@ builds:
   - id: yafai-core_linux_arm64
     main: ./main.go
     goos: [linux]
-    goarch: [amd64]
+    goarch: [arm64]
     env:
       - CGO_ENABLED=1
       - CC=aarch64-linux-gnu-gcc
