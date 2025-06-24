@@ -130,7 +130,15 @@ func showWorkspaceSelection(ctx context.Context, app *tview.Application, dbw *db
 		return
 	}
 	if len(workspaces) == 0 {
-		slog.Warn("No workspaces found")
+		// Show a modal dialog with instructions
+		modal := tview.NewModal().
+			SetText("No workspaces found.\n\nTo create a workspace, run:\n\n  yafai-core load <your-workspace.yaml>\n\nand restart YAFAI.").
+			AddButtons([]string{"Quit"}).
+			SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+				app.Stop()
+				os.Exit(0)
+			})
+		app.SetRoot(modal, true).SetFocus(modal)
 		return
 	}
 
@@ -521,7 +529,33 @@ func runWorkspaceUI(ctx context.Context, app *tview.Application, dbw *db.DBWrapp
 	return layout, inputField, nil
 }
 
+func setupLogger(env string, yafaiRoot string) error {
+	var logPath string
+	if env == "prod" {
+		logPath = fmt.Sprintf("%s/yafai.log", yafaiRoot)
+	} else {
+		logPath = "tmp/debug.log"
+	}
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		slog.Error("Failed to open log file", "path", logPath, "error", err)
+		return fmt.Errorf("failed to open log file: %v", err)
+	}
+	//defer logFile.Close()
+
+	// Configure the logger to write to the log file
+	logFileHandler := slog.NewTextHandler(logFile, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})
+
+	logger := slog.New(logFileHandler)
+	slog.SetDefault(logger)
+
+	return nil
+}
+
 func StartYafai(env string, mode string, configsPath string) error {
+	setupLogger(env, fmt.Sprintf("%s/.yafai", os.Getenv("HOME")))
 	slog.Info("StartYafai called", "env", env, "mode", mode, "configsPath", configsPath)
 	defer slog.Info("StartYafai completed")
 
@@ -593,27 +627,6 @@ func StartYafai(env string, mode string, configsPath string) error {
 	}
 
 	_ = godotenv.Load(envPath)
-
-	var logPath string
-	if env == "prod" {
-		logPath = fmt.Sprintf("%s/yafai.log", yafaiRoot)
-	} else {
-		logPath = "tmp/debug.log"
-	}
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-	if err != nil {
-		slog.Error("Failed to open log file", "path", logPath, "error", err)
-		return fmt.Errorf("failed to open log file: %v", err)
-	}
-	//defer logFile.Close()
-
-	// Configure the logger to write to the log file
-	logFileHandler := slog.NewTextHandler(logFile, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	})
-
-	logger := slog.New(logFileHandler)
-	slog.SetDefault(logger)
 
 	if err != nil {
 		slog.Error("Error setting up YAFAI: %v", err.Error(), nil)
