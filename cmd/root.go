@@ -153,12 +153,14 @@ func showWorkspaceSelection(ctx context.Context, app *tview.Application, dbw *db
 	messageView := tview.NewTextView().
 		SetTextAlign(tview.AlignCenter).
 		SetDynamicColors(true).
-		SetText("[::b]Welcome to YAFAI\n\nSelect a workspace to continue.")
+		SetText("[::b][green]\n\nWelcome to YAFAI, Select a workspace to continue.")
 
 	// --- Workspace List ---
 	list := tview.NewList().ShowSecondaryText(false)
-	list.SetBorder(true).SetTitle("[::b] Workspaces [::-]").SetTitleAlign(tview.AlignCenter)
-	//list.Set(40) // keep it narrow and centered
+	list.SetBorder(true).
+		SetTitle("[::b] Workspaces [::-]").
+		SetTitleAlign(tview.AlignCenter) // right-align workspace names
+
 	for _, ws := range workspaces {
 		wsCopy := ws // capture for closure
 		list.AddItem(fmt.Sprintf("[::b]%s[::-]", wsCopy.Name), "", 0, func() {
@@ -174,28 +176,42 @@ func showWorkspaceSelection(ctx context.Context, app *tview.Application, dbw *db
 		})
 	}
 
+	// --- Responsive List Container ---
+	listContainer := tview.NewFlex().
+		SetDirection(tview.FlexColumn).
+		AddItem(tview.NewBox().SetBackgroundColor(tcell.ColorBlack), 0, 3, false). // left spacer (60%)
+		AddItem(list, 0, 2, true).                                                 // list (40%)
+		AddItem(tview.NewBox().SetBackgroundColor(tcell.ColorBlack), 0, 3, false)
+
 	// --- Footer/help bar ---
 	footer := tview.NewTextView().
 		SetDynamicColors(true).
 		SetTextAlign(tview.AlignCenter).
 		SetText("[::b][↑/↓] Navigate   [Enter] Select   [q] Quit[::-]").
-		SetBorderPadding(0, 0, 1, 1)
+		SetBorderPadding(2, 2, 1, 1)
 
-		// --- Main vertical layout ---
+	// --- Main vertical layout ---
 	layout := tview.NewFlex().
 		SetDirection(tview.FlexRow).
-		AddItem(artView, 0, 10, false).
+		AddItem(artView, 5, 1, false).
 		AddItem(messageView, 3, 0, false).
-		AddItem(list, 10, 0, true).
-		AddItem(footer, 1, 0, false)
+		AddItem(listContainer, 0, 2, true).
+		AddItem(footer, 3, 0, false)
 
-	// Center the whole layout vertically and horizontally
+	// Center vertically (optional)
 	centered := tview.NewFlex().
 		SetDirection(tview.FlexRow).
-		AddItem(nil, 0, 1, false).
-		AddItem(layout, 0, 1, true).
-		AddItem(nil, 0, 1, false)
+		AddItem(tview.NewBox().SetBackgroundColor(tcell.ColorBlack), 0, 1, false).
+		AddItem(layout, 0, 2, true).
+		AddItem(tview.NewBox().SetBackgroundColor(tcell.ColorBlack), 0, 1, false)
 
+	artView.SetBackgroundColor(tcell.ColorBlack)
+	messageView.SetBackgroundColor(tcell.ColorBlack)
+	list.SetBackgroundColor(tcell.ColorBlack)
+	listContainer.SetBackgroundColor(tcell.ColorBlack)
+	footer.SetBackgroundColor(tcell.ColorBlack)
+	layout.SetBackgroundColor(tcell.ColorBlack)
+	centered.SetBackgroundColor(tcell.ColorBlack)
 	app.SetRoot(centered, true).SetFocus(list)
 
 	// Handle quit
@@ -253,14 +269,12 @@ func runWorkspaceUI(ctx context.Context, app *tview.Application, dbw *db.DBWrapp
 		return nil, nil, fmt.Errorf("failed to load workspace: %w", err)
 	}
 
-	title := fmt.Sprintf("[yellow::b] YAFAI - %s workspace", wsp.Name)
-
 	banner := tview.NewTextView().
 		SetTextAlign(tview.AlignCenter).
 		SetDynamicColors(true).
 		SetRegions(true).
 		SetBorder(true).
-		SetTitle(fmt.Sprintf("%s   [white][\"home\"][::bu] Workspaces[::-]", title))
+		SetTitle(fmt.Sprintf("[yellow::b] YAFAI - %s workspace", wsp.Name))
 
 	threadList := tview.NewList().ShowSecondaryText(false)
 	threadList.SetBorder(true).SetTitle(" Threads ")
@@ -323,6 +337,18 @@ func runWorkspaceUI(ctx context.Context, app *tview.Application, dbw *db.DBWrapp
 		AddItem(banner, 3, 0, false).
 		AddItem(mainFrame, 0, 1, true).
 		AddItem(footer, 1, 0, false)
+
+	banner.SetBackgroundColor(tcell.ColorBlack)
+	threadList.SetBackgroundColor(tcell.ColorBlack)
+	statusView.SetBackgroundColor(tcell.ColorBlack)
+	chatView.SetBackgroundColor(tcell.ColorBlack)
+	inputField.SetBackgroundColor(tcell.ColorBlack)
+	leftColumnContainer.SetBackgroundColor(tcell.ColorBlack)
+	chatContainer.SetBackgroundColor(tcell.ColorBlack)
+	splitContainer.SetBackgroundColor(tcell.ColorBlack)
+	mainFrame.SetBackgroundColor(tcell.ColorBlack)
+	footer.SetBackgroundColor(tcell.ColorBlack)
+	layout.SetBackgroundColor(tcell.ColorBlack)
 
 	threads, err := dbw.ListThreadsForWorkspace(ctx, workspaceID)
 	if err != nil {
